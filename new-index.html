@@ -135,6 +135,18 @@ pre{background:#0d1117;color:#e6edf3;padding:14px 16px;border-radius:6px;font-si
 .lld-nav button{flex:1;padding:10px;background:#161b22;border:1px solid #30363d;color:#8b949e;border-radius:6px;cursor:pointer;font-size:13px;font-weight:600;transition:all 0.15s}
 .lld-nav button:hover:not(:disabled){border-color:#58a6ff;color:#58a6ff;background:#1c2333}
 .lld-nav button:disabled{opacity:0.3;cursor:default}
+.lld-mini-guide{background:#161b22;border:1px solid #30363d;border-radius:6px;margin-bottom:24px;overflow:hidden}
+.lld-mini-guide-btn{width:100%;text-align:left;background:none;border:none;color:#8b949e;padding:10px 14px;cursor:pointer;font-size:13px;font-weight:600;display:flex;align-items:center;gap:8px;transition:color 0.15s}
+.lld-mini-guide-btn:hover{color:#58a6ff}
+.lld-mini-guide-btn .mg-arrow{font-size:10px;transition:transform 0.15s}
+.lld-mini-guide.open .mg-arrow{transform:rotate(90deg)}
+.lld-mini-guide-body{display:none;padding:0 14px 12px;font-size:12px;color:#8b949e;line-height:2}
+.lld-mini-guide.open .lld-mini-guide-body{display:block}
+.lld-mini-guide-body span{color:#58a6ff;font-weight:700}
+.lld-mini-guide-body .mg-step{display:flex;gap:8px;align-items:baseline}
+.lld-mini-guide-body .mg-num{color:#1f6feb;font-weight:700;min-width:18px}
+.lld-mini-guide-body .mg-arrow-r{color:#484f58;margin:0 2px}
+.step-desc{font-size:12px;color:#484f58;font-style:italic;margin:-6px 0 8px 40px;line-height:1.5}
 .vs-table{width:100%;border-collapse:collapse;font-size:13px;margin:12px 0;border-radius:6px;overflow:hidden}
 .vs-table th{background:#8b5cf6;color:#fff;padding:8px 12px;text-align:left;font-weight:600;font-size:12px;letter-spacing:0.03em}
 .vs-table td{padding:7px 12px;border-bottom:1px solid #21262d}
@@ -3525,32 +3537,52 @@ function renderLldQuestion(q,qi,totalQ){
   html+=`<div class="lld-title-bar"><span class="lld-qnum">Q${q.n}</span>${q.t}</div>`;
   html+=`<div class="lld-walkthrough-body">`;
 
+  // Mini-guide: collapsible 8-step template
+  html+=`<div class="lld-mini-guide"><button class="lld-mini-guide-btn" onclick="this.parentElement.classList.toggle('open')"><span class="mg-arrow">▶</span> The 8-Step LLD Template — use this for every problem</button>`;
+  html+=`<div class="lld-mini-guide-body">`;
+  html+=`<div class="mg-step"><span class="mg-num">1.</span> What does user DO? <span class="mg-arrow-r">→</span> derive <span>METHODS</span></div>`;
+  html+=`<div class="mg-step"><span class="mg-num">2.</span> What things EXIST? <span class="mg-arrow-r">→</span> derive <span>CLASSES</span></div>`;
+  html+=`<div class="mg-step"><span class="mg-num">3.</span> Entity / Service / Manager <span class="mg-arrow-r">→</span> <span>classify</span> each class</div>`;
+  html+=`<div class="mg-step"><span class="mg-num">4.</span> WHO owns WHAT method? <span class="mg-arrow-r">→</span> <span>THE key decision</span></div>`;
+  html+=`<div class="mg-step"><span class="mg-num">5.</span> Write code <span class="mg-arrow-r">→</span> constructor + <span>methods</span></div>`;
+  html+=`<div class="mg-step"><span class="mg-num">6.</span> What PATTERNS? <span class="mg-arrow-r">→</span> <span>Singleton, Strategy, Observer, Factory</span></div>`;
+  html+=`<div class="mg-step"><span class="mg-num">7.</span> What can GO WRONG? <span class="mg-arrow-r">→</span> <span>edge cases</span></div>`;
+  html+=`<div class="mg-step"><span class="mg-num">8.</span> How to EXTEND? <span class="mg-arrow-r">→</span> add feature <span>without changing</span> existing code</div>`;
+  html+=`</div></div>`;
+
   // Step 1: THE PROBLEM
   html+=`<div class="lld-step-block"><div class="lld-step-header"><span class="step-num">1</span><span class="step-label">THE PROBLEM</span></div>`;
+  html+=`<div class="step-desc">Read this once. Everything below is derived from this single statement.</div>`;
   html+=`<div class="lld-problem-box">${q.req}</div></div>`;
 
   // Step 2: What does user DO?
   html+=`<div class="lld-step-block"><div class="lld-step-header"><span class="step-num">2</span><span class="step-label">What does user DO?</span><span class="step-sub">→ derive methods from this</span></div>`;
+  html+=`<div class="step-desc">Walk through the user journey step by step. Each user action becomes a method. Each step in the flow tells you WHO calls WHAT.</div>`;
   html+=`<div class="lld-flow">${q.flow}</div></div>`;
 
   // Step 3: What THINGS exist?
   html+=`<div class="lld-step-block"><div class="lld-step-header"><span class="step-num">3</span><span class="step-label">What THINGS exist?</span><span class="step-sub">→ Entity / Service / Manager</span></div>`;
+  html+=`<div class="step-desc">Every noun from Step 1 is a potential class. Classify each: Entity = holds data + small self-methods. Service = business logic across multiple objects. Manager = orchestrates the full flow.</div>`;
   html+=`<div class="lld-classes">${q.classes}</div></div>`;
 
   // Step 4: The complete code
   html+=`<div class="lld-step-block"><div class="lld-step-header"><span class="step-num">4</span><span class="step-label">Complete Code</span><span class="step-sub">→ constructor + methods</span></div>`;
+  html+=`<div class="step-desc">Rule: method needs only SELF data? → put it on that Entity. Needs BUSINESS rules or multiple objects? → Service. Coordinates a multi-step flow? → Manager.</div>`;
   html+=`<pre>${q.code}</pre></div>`;
 
   // Step 5: Design patterns & WHY
   html+=`<div class="lld-step-block"><div class="lld-step-header"><span class="step-num">5</span><span class="step-label">Design Patterns & WHY</span></div>`;
+  html+=`<div class="step-desc">Don't just name the pattern — say WHY it fits. "Strategy because adding a new billing type tomorrow shouldn't change the ParkingLot class."</div>`;
   html+=`<div class="lld-patterns">${q.patterns}</div></div>`;
 
   // Step 6: Edge cases
   html+=`<div class="lld-step-block"><div class="lld-step-header"><span class="step-num">6</span><span class="step-label">What can GO WRONG?</span><span class="step-sub">→ edge cases</span></div>`;
+  html+=`<div class="step-desc">Think: concurrent access (two users, same resource), resource exhaustion (full/empty), failures (payment fails, network down), invalid input, timeouts.</div>`;
   html+=`<div class="lld-edge">${q.edge}</div></div>`;
 
   // Step 7: What interviewer evaluates
   html+=`<div class="lld-step-block"><div class="lld-step-header"><span class="step-num">7</span><span class="step-label">What interviewer evaluates</span></div>`;
+  html+=`<div class="step-desc">These are the signals that make the interviewer check "strong hire." Mention these points explicitly during your walkthrough.</div>`;
   html+=`<div class="lld-tip-box">${q.tip}</div></div>`;
 
   // Prev/Next navigation
