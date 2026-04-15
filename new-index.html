@@ -131,6 +131,13 @@ pre{background:#0d1117;color:#e6edf3;padding:14px 16px;border-radius:6px;font-si
 .lld-tip-box b{color:#58a6ff}
 .lld-extend-box{background:#d2a8ff08;border:1px solid #d2a8ff30;border-radius:6px;padding:14px 16px;font-size:13px;line-height:1.8;color:#d2a8ff}
 .lld-extend-box b{color:#f0883e}
+.lld-pre-block{background:#0d1117;border:1px solid #21262d;color:#c9d1d9}
+.lld-pre-green{background:#3fb95008;border:1px solid #3fb95025;color:#8be9b0}
+.lld-pre-orange{background:#f0883e08;border:1px solid #f0883e25;color:#f0c14b}
+.lld-pre-blue{background:#58a6ff08;border:1px solid #58a6ff25;color:#79c0ff}
+.lld-pre-purple{background:#d2a8ff08;border:1px solid #d2a8ff25;color:#d2a8ff}
+.lld-pre-red{background:#f8514908;border:1px solid #f8514925;color:#ffa198}
+.lld-pre-tip{background:#3fb95008;border:1px solid #3fb95025;color:#3fb950}
 .lld-nav{display:flex;gap:10px;padding:16px 0 0;border-top:1px solid #21262d;margin-top:8px}
 .lld-nav button{flex:1;padding:10px;background:#161b22;border:1px solid #30363d;color:#8b949e;border-radius:6px;cursor:pointer;font-size:13px;font-weight:600;transition:all 0.15s}
 .lld-nav button:hover:not(:disabled){border-color:#58a6ff;color:#58a6ff;background:#1c2333}
@@ -3532,7 +3539,2213 @@ LLD.forEach((sec,si)=>{
 function selLld(si){document.querySelectorAll('#page-lld .s-topic').forEach(e=>e.classList.remove('active'));document.getElementById('lst-'+si).classList.add('active');selLldItem(si,0)}
 function selLldItem(si,ii){activeLldIdx=si;activeLldItemIdx=ii;document.querySelectorAll('#page-lld .s-pat').forEach(e=>e.classList.remove('active'));const el=document.getElementById('lp-'+si+'-'+ii);if(el)el.classList.add('active');document.querySelectorAll('#page-lld .s-topic').forEach(e=>e.classList.remove('active'));document.getElementById('lst-'+si).classList.add('active');renderLld(si,ii);lldContent.scrollTop=0;const sec=LLD[si];const name=sec.isQuestions?sec.questions[ii]?.t:sec.items[ii]?.t;lldBreadcrumb.innerHTML=`${sec.section} <span>→ ${name||''}</span>`}
 
+const LLD_DETAIL = {
+1:{
+problem:`Multi-floor parking lot. Cars, bikes, trucks.
+User drives in → gets spot → parks → leaves → pays → exits.`,
+userDoes:`1. Drive in          → need: findAvailableSpot()
+2. Get assigned spot → need: park(vehicle)
+3. Get ticket        → need: createTicket()
+4. Later, leave      → need: unpark(ticket)
+5. Pay bill          → need: calculate() + pay()
+6. Exit              → need: freeSpot()`,
+things:`Vehicle    → the car/bike/truck coming in
+Spot       → the parking space
+Floor      → holds many spots
+Ticket     → proof of parking (entry time, spot, vehicle)
+Bill       → hours × rate
+Payment    → cash/card/UPI
+ParkingLot → the whole system`,
+classify:`ENTITIES (just data, no logic):
+  Vehicle     { licensePlate, type }
+  Spot        { spotId, floorId, type, status, vehicle }
+  Floor       { floorId, spots[] }
+  Ticket      { ticketId, vehicle, spot, entryTime, exitTime }
+
+ENUMS (fixed values):
+  VehicleType  { CAR, BIKE, TRUCK }
+  SpotType     { SMALL, MEDIUM, LARGE }
+  SpotStatus   { AVAILABLE, OCCUPIED, MAINTENANCE }
+  PaymentMethod { CASH, CARD, UPI }
+
+SERVICES (business logic):
+  BillingService    { calculate(ticket) → amount }
+  PaymentProcessor  { pay(amount) → bool }  ← Strategy interface
+    ├── CashPayment  { pay(amount) }
+    ├── CardPayment  { pay(amount) }
+    └── UPIPayment   { pay(amount) }
+
+MANAGER (orchestrates everything):
+  ParkingLot (Singleton)
+    { floors[], billingService }
+    { park(vehicle), unpark(ticket, paymentMethod) }`,
+ownership:`┌──────────────────────┬───────────────┬─────────────────────────────┐
+│ Method               │ Owner         │ WHY                         │
+├──────────────────────┼───────────────┼─────────────────────────────┤
+│ isAvailable()        │ Spot          │ only needs self.status      │
+│ park(vehicle)        │ Spot          │ sets self.vehicle + status  │
+│ unpark()             │ Spot          │ clears self.vehicle + status│
+│ findAvailableSpot()  │ Floor         │ searches its own spots[]    │
+│ calculate(ticket)    │ BillingService│ needs ticket + rates (multi)│
+│ pay(amount)          │ PaymentProc.  │ handles money (strategy)    │
+│ park(vehicle) FLOW   │ ParkingLot    │ coordinates all above       │
+│ unpark(ticket) FLOW  │ ParkingLot    │ coordinates all above       │
+└──────────────────────┴───────────────┴─────────────────────────────┘
+
+RULE: Needs only SELF data? → Entity method
+      Needs BUSINESS rules? → Service method
+      Coordinates MULTIPLE steps? → Manager method`,
+patternsWhy:`SINGLETON — ParkingLot
+  WHY: one building = one lot. Can't have two lot instances
+       giving same spot to different cars.
+
+STRATEGY — PaymentProcessor (Cash/Card/UPI)
+  WHY: adding PayPal tomorrow shouldn't change ParkingLot code.
+       Just create new class: class PayPalPayment { pay() {...} }
+
+DI — BillingService injected via constructor
+  WHY: swap billing logic (flat rate weekends?) without changing lot.
+       Also: inject MockBillingService for testing.
+
+STATE — Spot status (AVAILABLE/OCCUPIED/MAINTENANCE)
+  WHY: prevents invalid transitions.
+       Can't park in MAINTENANCE spot.
+       Can't unpark AVAILABLE spot.`,
+edgeCases:`1. Lot full           → park() throws "Parking lot full"
+2. Payment fails      → don't free spot. Car still there.
+3. Double parking     → spot.park() checks isAvailable() first
+4. Same car twice     → check licensePlate before parking
+5. Truck in bike spot → TYPE_MAP prevents wrong assignment
+6. Spot maintenance   → status=MAINTENANCE, skip in search
+7. Lost ticket        → lookup by licensePlate in tickets[]
+8. Overnight parking  → billing handles 24hr+ correctly (ceil hours)`,
+extend:`Add EV charging spots?
+  → Add SpotType.EV_CHARGING + VehicleType.EV + TYPE_MAP entry
+  → ZERO changes to ParkingLot, Floor, Spot classes ✅
+
+Add valet parking?
+  → Create ValetService { parkCar(), retrieveCar() }
+  → Injects ParkingLot, calls lot.park() internally
+  → ZERO changes to existing code ✅
+
+Add subscription/monthly pass?
+  → Create SubscriptionService { isSubscribed(), getDiscount() }
+  → BillingService checks subscription before calculating
+  → ZERO changes to ParkingLot, Spot, Floor ✅`,
+evaluates:`✅ "He separated billing from payment" (Single Responsibility)
+✅ "Payment is a strategy — extensible" (Open/Closed)
+✅ "BillingService injected, not hardcoded" (DI)
+✅ "Spot has state machine — prevents invalid actions"
+✅ "ParkingLot is singleton — makes sense for one building"
+✅ "He walked through the flow first, then wrote code"
+✅ "He mentioned edge cases without being asked"
+✅ "TYPE_MAP separates vehicle→spot logic cleanly"`
+},
+2:{
+problem:`ATM machine with card reader, cash dispenser, screen.
+User inserts card → enters PIN → checks balance / withdraws / deposits → takes card.`,
+userDoes:`1. Insert card     → need: insertCard(card)
+2. Enter PIN       → need: verifyPIN(pin)
+3. Select action   → need: showMenu()
+4. Withdraw cash   → need: withdraw(amount)
+5. Check balance   → need: checkBalance()
+6. Deposit cash    → need: deposit(amount)
+7. Take card       → need: ejectCard()`,
+things:`Card           → the bank card (number, PIN, accountId)
+Account        → bank account (balance)
+Transaction    → record of action (type, amount, timestamp)
+CashDispenser  → holds denominations, dispenses notes
+CardReader     → reads/ejects/swallows cards
+Screen         → displays menus and messages
+ATM            → the whole machine`,
+classify:`ENTITIES (just data, no logic):
+  Card          { cardNum, pin, accountId, isBlocked, failedAttempts }
+  Account       { id, balance, type }
+  Transaction   { id, type, amount, timestamp, status }
+
+ENUMS (fixed values):
+  ATMState       { IDLE, CARD_IN, AUTHED, DISPENSING }
+  TransactionType { WITHDRAW, DEPOSIT, BALANCE_CHECK, TRANSFER }
+
+HARDWARE (device wrappers):
+  CardReader     { read(), eject(), swallow() }
+  CashDispenser  { notes Map, hasCash(amt), dispense(amt) }
+  Screen         { showMenu(), showMessage() }
+  ReceiptPrinter { print(transaction) }
+
+SERVICES (business logic):
+  BankService    { verifyPIN(), getBalance(), debit(), credit() }
+
+MANAGER (orchestrates everything):
+  ATM (Singleton + State Machine)
+    { state, card, account, dispenser, bankService }
+    { insertCard(), enterPin(), withdraw(), deposit() }`,
+ownership:`┌──────────────────────┬───────────────┬──────────────────────────────┐
+│ Method               │ Owner         │ WHY                          │
+├──────────────────────┼───────────────┼──────────────────────────────┤
+│ withdraw(amt)        │ Account       │ only needs self.balance      │
+│ deposit(amt)         │ Account       │ only needs self.balance      │
+│ isBlocked()          │ Card          │ only needs self.isBlocked    │
+│ hasCash(amt)         │ CashDispenser │ checks its own notes Map     │
+│ dispense(amt)        │ CashDispenser │ greedy algo on its own notes │
+│ verifyPIN()          │ BankService   │ external bank call (network) │
+│ withdraw() FLOW      │ ATM           │ coordinates all above        │
+│ insertCard() FLOW    │ ATM           │ state transition + validate  │
+└──────────────────────┴───────────────┴──────────────────────────────┘
+
+RULE: CashDispenser owns dispense (coin-change problem).
+      Account owns balance changes. ATM orchestrates.`,
+patternsWhy:`STATE — ATM states (IDLE → CARD_IN → AUTHED → DISPENSING)
+  WHY: can't withdraw without auth. Can't insert card when busy.
+       Each state defines which actions are valid.
+
+STRATEGY — CashDispenser (Greedy vs MinNotes)
+  WHY: different algorithms for dispensing same amount.
+       GreedyStrategy: largest notes first (fast).
+       MinNotesStrategy: fewest notes (customer-friendly).
+
+SINGLETON — ATM instance
+  WHY: one physical machine = one ATM object.
+       Two instances = two dispenses from same slot.
+
+OBSERVER — ATM notifies bank when cash low
+  WHY: bank needs to schedule refill without polling.`,
+edgeCases:`1. Wrong PIN 3x       → block card + swallow + alert bank
+2. ATM out of cash    → reject withdrawal + show "unavailable"
+3. Network down       → "Service unavailable", eject card
+4. User walks away    → 30s timeout → cancel + eject card
+5. Power failure      → transaction log for reconciliation
+6. Cash not taken     → retract after 30s → credit back
+7. Daily limit        → check dailyWithdrawn + amount &lt;= limit
+8. Undispensable amt  → reject if can't make exact denominations`,
+extend:`Add contactless/NFC?
+  → Create NFCReader extends CardReader
+  → ATM uses CardReader interface, swap implementation
+  → ZERO changes to ATM, Account, CashDispenser ✅
+
+Add mini-statement?
+  → Add Transaction[] to Account + getRecentTransactions()
+  → ATM.showMiniStatement() calls account method
+  → ZERO changes to CashDispenser, Card ✅
+
+Add UPI withdrawal (cardless)?
+  → Create UPIAuthService implements AuthService
+  → ATM skips card step, uses phone OTP
+  → ZERO changes to CashDispenser, Account ✅`,
+evaluates:`✅ "CashDispenser is a coin-change/greedy problem" (algo knowledge)
+✅ "ATM has proper state machine" (State Pattern)
+✅ "BankService is external — network boundary clear"
+✅ "Card blocks after 3 failures — security edge case"
+✅ "Account owns balance, not ATM" (Single Responsibility)
+✅ "Denominations detail shows depth"
+✅ "Timeout handling for abandoned transactions"
+✅ "Transaction log for crash recovery — production thinking"`
+},
+3:{
+problem:`Movie ticket booking system like BookMyShow.
+User browses movies → picks show → selects seats → holds → pays → gets booking.`,
+userDoes:`1. Browse movies    → need: getMovies()
+2. Pick showtime    → need: getShows(movieId)
+3. View seat map    → need: getSeats(showId)
+4. Select seats     → need: holdSeats(userId, seatIds)
+5. Pay within 5min  → need: processPayment(amount)
+6. Confirm booking  → need: confirmBooking(bookingId)
+7. Cancel (optional)→ need: cancelBooking(bookingId)`,
+things:`Movie      → the film (title, duration, genre)
+Show       → a screening (movie + theater + time)
+Seat       → one seat in a show (row, number, type, status)
+Booking    → confirmed reservation (user, show, seats, total)
+Theater    → venue with screens
+Screen     → a hall with rows of seats
+Payment    → cash/card/UPI for ticket price`,
+classify:`ENTITIES (just data, no logic):
+  Movie       { id, title, duration, genre }
+  Show        { id, movie, screen, time, seats[] }
+  Seat        { id, row, num, type, status, heldBy, holdExpiry }
+  Booking     { id, userId, show, seats[], total, status }
+
+ENUMS (fixed values):
+  SeatType     { REGULAR, PREMIUM, VIP }
+  SeatStatus   { AVAILABLE, HELD, BOOKED }
+  BookingStatus { HELD, CONFIRMED, CANCELLED }
+
+SERVICES (business logic):
+  PricingService   { rates Map, calculate(seats) → total }
+  PaymentService   { process(amount) → bool }  ← Strategy
+  NotificationSvc  { notify(user, msg) }        ← Observer
+
+MANAGER (orchestrates everything):
+  BookingSystem (Singleton)
+    { shows Map, bookings Map, pricing }
+    { holdSeats(), confirmBooking(), cancelBooking() }`,
+ownership:`┌──────────────────────┬────────────────┬──────────────────────────────┐
+│ Method               │ Owner          │ WHY                          │
+├──────────────────────┼────────────────┼──────────────────────────────┤
+│ isAvailable()        │ Seat           │ only needs self.status       │
+│ hold(userId)         │ Seat           │ sets self.status + heldBy    │
+│ book()               │ Seat           │ sets self.status to BOOKED   │
+│ release()            │ Seat           │ resets self to AVAILABLE     │
+│ isHoldExpired()      │ Seat           │ checks self.holdExpiry       │
+│ calculate(seats)     │ PricingService │ needs seats + rates (multi)  │
+│ holdSeats() FLOW     │ BookingSystem  │ coordinates hold + pricing   │
+│ confirmBooking()     │ BookingSystem  │ coordinates pay + book       │
+│ cleanupExpiredHolds()│ BookingSystem  │ background job, scans all    │
+└──────────────────────┴────────────────┴──────────────────────────────┘
+
+KEY: Seat owns its own state transitions.
+     BookingSystem coordinates the multi-step flow.`,
+patternsWhy:`STATE — Seat (AVAILABLE → HELD → BOOKED)
+  WHY: prevents double-booking. Two users can't hold same seat.
+       HELD has TTL (5 min) — auto-releases if unpaid.
+
+STRATEGY — PricingService (Regular/Weekend/Premiere)
+  WHY: pricing changes by day/event without touching BookingSystem.
+       Friday pricing ≠ Tuesday pricing. Just swap strategy.
+
+OBSERVER — Notify waitlisted users on seat release
+  WHY: when held seats expire, waiting users get alerted.
+       Decouples seat management from notification logic.
+
+TEMPLATE — Hold → Pay → Confirm flow is fixed
+  WHY: steps are always the same, but payment/pricing vary.
+       Template locks the skeleton, strategies fill the details.`,
+edgeCases:`1. Two users, same seat  → first hold() wins, second throws error
+2. Payment timeout       → 5min expiry, background job releases seats
+3. Payment fails         → release held seats, show error
+4. Partial availability  → hold ALL or NONE (atomic operation)
+5. Show already started  → block booking if currentTime > showTime
+6. Refund/cancellation   → policy based on time before show
+7. Seat map mismatch     → validate seatIds belong to showId
+8. Concurrent cleanup    → lock seats during cleanup to avoid race`,
+extend:`Add waitlist for sold-out shows?
+  → Create WaitlistService { join(), notify() }
+  → Observer pattern: cancelled booking triggers notify
+  → ZERO changes to Seat, BookingSystem core ✅
+
+Add food/combo add-ons?
+  → Create AddOnService { getAddOns(), calculateTotal() }
+  → Booking gets addOns[] field, pricing includes them
+  → ZERO changes to Seat, Show, Screen ✅
+
+Add multiple cinemas/cities?
+  → Create Cinema { id, city, screens[] }
+  → SearchService filters by city first
+  → ZERO changes to Seat, Booking, PricingService ✅`,
+evaluates:`✅ "Hold mechanism prevents double-booking" (core insight)
+✅ "5-min TTL with background cleanup" (production thinking)
+✅ "Atomic hold — all seats or none" (consistency)
+✅ "Seat owns its own state transitions" (SRP)
+✅ "PricingService separate from BookingSystem" (SRP)
+✅ "Observer for waitlist notifications" (extensible)
+✅ "Mentioned concurrent access edge case"
+✅ "State machine: AVAILABLE → HELD → BOOKED with timeout"`
+},
+4:{
+problem:`Multiple elevators in a building serving N floors.
+User presses button → system assigns best elevator → rides to destination floor.`,
+userDoes:`1. Press hall button → need: request(floor, direction)
+2. Wait for elevator → need: assignElevator(request)
+3. Enter elevator    → need: openDoors()
+4. Press floor btn   → need: addDestination(floor)
+5. Ride to floor     → need: move()
+6. Exit elevator     → need: openDoors() + closeDoors()`,
+things:`Request            → hall call (floor + direction)
+Elevator           → the cab (currentFloor, direction, destinations)
+Floor              → a level in the building
+Button             → hall button (UP/DOWN) or cabin button (floor)
+ElevatorController → the brain that assigns requests
+SchedulingStrategy → algorithm to pick best elevator`,
+classify:`ENTITIES (just data, no logic):
+  Request     { floor, direction, timestamp }
+  Elevator    { id, currentFloor, direction, state, destinations Set }
+
+ENUMS (fixed values):
+  Direction      { UP, DOWN, IDLE }
+  ElevatorState  { IDLE, MOVING, DOOR_OPEN, MAINTENANCE }
+
+SERVICES (business logic):
+  SchedulingStrategy  { assign(request, elevators[]) → elevator }
+    ├── FCFSStrategy       { assign() }  — first come first served
+    ├── NearestStrategy    { assign() }  — closest + same direction
+    └── LOOKStrategy       { assign() }  — disk-scan algorithm
+
+MANAGER (orchestrates everything):
+  ElevatorController (Singleton)
+    { elevators[], strategy, pendingRequests[] }
+    { request(floor, dir), step(), assignPending() }`,
+ownership:`┌──────────────────────┬─────────────────────┬─────────────────────────┐
+│ Method               │ Owner               │ WHY                     │
+├──────────────────────┼─────────────────────┼─────────────────────────┤
+│ addDestination(flr)  │ Elevator            │ modifies own queue      │
+│ move()               │ Elevator            │ changes own currentFloor│
+│ isIdle()             │ Elevator            │ checks own state        │
+│ openDoors()          │ Elevator            │ changes own state       │
+│ assign(req, elevs[]) │ SchedulingStrategy  │ algorithm logic (multi) │
+│ request(flr, dir)    │ ElevatorController  │ coordinates assignment  │
+│ step()               │ ElevatorController  │ ticks all elevators     │
+└──────────────────────┴─────────────────────┴─────────────────────────┘
+
+RULE: Elevator moves itself. Strategy picks which one.
+      Controller coordinates the system-wide flow.`,
+patternsWhy:`STRATEGY — SchedulingStrategy (FCFS/Nearest/LOOK)
+  WHY: "What if we change the scheduling algorithm?"
+       Swap NearestStrategy for LOOKStrategy in one line.
+       No changes to Elevator or Controller code.
+
+OBSERVER — Elevator notifies Controller on floor arrival
+  WHY: Controller needs to know when pickup/dropoff happens.
+       Decouples elevator movement from system coordination.
+
+STATE — Elevator states (IDLE/MOVING/DOOR_OPEN/MAINTENANCE)
+  WHY: can't take requests during MAINTENANCE.
+       Must stop at floor before DOOR_OPEN.
+       Prevents invalid transitions.
+
+SINGLETON — ElevatorController
+  WHY: one building = one controller. Two controllers
+       would assign same elevator to different requests.`,
+edgeCases:`1. All elevators busy → queue request, assign when one frees
+2. Weight limit        → skip full elevator, assign next
+3. Emergency stop      → all elevators to nearest floor + open
+4. Fire mode           → all go to ground floor, disable buttons
+5. VIP elevator        → reserved for certain floors/users
+6. Maintenance mode    → take offline without disrupting others
+7. Power outage        → battery backup to nearest floor
+8. Door sensor blocked → retry close, timeout → alarm`,
+extend:`Add express elevator (floors 20-40 only)?
+  → Create ExpressElevator extends Elevator { validFloors Set }
+  → Strategy filters by validFloors before assigning
+  → ZERO changes to Controller, Request ✅
+
+Add voice control?
+  → Create VoiceInput { parseFloor(audio) → floor }
+  → Calls existing controller.request() underneath
+  → ZERO changes to Elevator, Strategy ✅
+
+Add load balancing (distribute evenly)?
+  → Create LoadBalanceStrategy implements SchedulingStrategy
+  → Considers elevator.destinations.size in assignment
+  → ZERO changes to Elevator, Controller ✅`,
+evaluates:`✅ "Strategy pattern is the star — swappable algorithms" (O/C)
+✅ "LOOK algorithm mentioned — real-world knowledge"
+✅ "Elevator owns its own movement" (SRP)
+✅ "Controller doesn't contain scheduling logic" (DI)
+✅ "Pending queue for when all busy" (production thinking)
+✅ "State machine prevents invalid actions"
+✅ "Emergency/fire mode edge case mentioned"
+✅ "Step-based simulation (tick) — clean testability"`
+},
+5:{
+problem:`Library system managing books, members, issuing, returns, fines.
+Member searches book → borrows → reads → returns → pays fine if late.`,
+userDoes:`1. Search book      → need: search(title/author/isbn)
+2. Check available  → need: getAvailableCopy(isbn)
+3. Borrow book      → need: issueBook(memberId, isbn)
+4. Read &amp; return    → need: returnBook(memberId, copyId)
+5. Pay fine         → need: payFine(memberId, amount)
+6. Reserve if taken → need: reserve(memberId, isbn)`,
+things:`Book       → a title (isbn, title, author) — can have many copies
+BookCopy   → physical copy (id, book, status, issuedTo, dueDate)
+Member     → library member (name, booksIssued[], maxBooks, fines)
+Fine       → overdue penalty (memberId, amount, reason)
+Waitlist   → queue for unavailable books
+Library    → the whole system`,
+classify:`ENTITIES (just data, no logic):
+  Book        { isbn, title, author, copies[] }
+  BookCopy    { id, book, status, issuedTo, dueDate }
+  Member      { id, name, booksIssued[], maxBooks, fines }
+
+ENUMS (fixed values):
+  BookStatus   { AVAILABLE, ISSUED, RESERVED, LOST }
+  MemberType   { STUDENT, FACULTY, GUEST }
+
+SERVICES (business logic):
+  SearchService  { byTitle(), byAuthor(), byISBN() }
+  FineService    { calculate(dueDate) → amount }  ← Strategy
+    ├── FlatFine       { calculate() }  — Rs5/day
+    └── GraduatedFine  { calculate() }  — Rs2 week1, Rs5 after
+
+MANAGER (orchestrates everything):
+  Library (Singleton)
+    { books Map, members Map, waitlist Map, fineService }
+    { issueBook(), returnBook(), reserve(), search() }`,
+ownership:`┌──────────────────────┬──────────────┬───────────────────────────────┐
+│ Method               │ Owner        │ WHY                           │
+├──────────────────────┼──────────────┼───────────────────────────────┤
+│ getAvailableCopy()   │ Book         │ searches its own copies[]     │
+│ issue(member)        │ BookCopy     │ sets self.status + issuedTo   │
+│ returnCopy()         │ BookCopy     │ resets self.status            │
+│ isOverdue()          │ BookCopy     │ checks self.dueDate vs now    │
+│ canIssue()           │ Member       │ checks own count + fines      │
+│ calculate(dueDate)   │ FineService  │ business rule (rate logic)    │
+│ issueBook() FLOW     │ Library      │ coordinates member + copy     │
+│ returnBook() FLOW    │ Library      │ coordinates return + fine     │
+└──────────────────────┴──────────────┴───────────────────────────────┘
+
+KEY: Book vs BookCopy distinction is critical.
+     A Book (title) can have multiple physical copies.`,
+patternsWhy:`OBSERVER — Notify waitlisted members on book return
+  WHY: when a copy is returned, first person in queue gets notified.
+       Library doesn't need to know HOW to notify (email/SMS).
+
+STRATEGY — FineService (FlatFine / GraduatedFine)
+  WHY: fine policy changes without touching Library code.
+       Summer = lenient fines. Exam season = strict fines.
+
+SINGLETON — Library.getInstance()
+  WHY: one library = one catalog. Two instances would
+       issue same copy to different members.
+
+DI — FineService injected into Library
+  WHY: swap fine strategy for testing (MockFineService).
+       Change policy without rewriting Library.`,
+edgeCases:`1. All copies issued  → allow reservation (waitlist FIFO)
+2. Outstanding fines  → block new issues until paid
+3. Book lost          → charge replacement cost + fine
+4. Max renewals       → 2 renewals max, then must return
+5. Member types       → Student=3 books, Faculty=10 books
+6. Book damaged       → member pays percentage of cost
+7. Overdue + reserved → fine + notify next in waitlist
+8. Duplicate ISBN     → reject when adding to catalog`,
+extend:`Add e-books / digital copies?
+  → Create DigitalCopy extends BookCopy { downloadLink }
+  → No physical return needed, auto-expires
+  → ZERO changes to Library, Member, FineService ✅
+
+Add inter-library loan?
+  → Create LoanService { requestFromPartner(isbn) }
+  → Uses Library.search() internally, creates temp BookCopy
+  → ZERO changes to Member, Book, FineService ✅
+
+Add recommendation engine?
+  → Create RecommendationService { suggest(memberId) }
+  → Reads member.booksIssued history, matches genres
+  → ZERO changes to Library, BookCopy, FineService ✅`,
+evaluates:`✅ "Book vs BookCopy — understands one-to-many" (modeling)
+✅ "FineService is separate from Library" (SRP)
+✅ "Member.canIssue() checks both limit AND fines" (validation)
+✅ "Waitlist with Observer for notifications" (extensible)
+✅ "Fine strategy is swappable" (Open/Closed)
+✅ "isOverdue() lives on BookCopy, not Library" (ownership)
+✅ "Different member types with different limits"
+✅ "Reservation system for unavailable books"`
+},
+6:{
+problem:`Vending machine dispensing products for coins/notes.
+User inserts money → selects product → gets product + change.`,
+userDoes:`1. Insert money     → need: insertMoney(amount)
+2. View products    → need: displayProducts()
+3. Select product   → need: selectProduct(slotId)
+4. Get product      → need: dispense()
+5. Get change       → need: makeChange(amount)
+6. Cancel &amp; refund  → need: refund()`,
+things:`Product        → item for sale (name, price, quantity)
+Slot           → position in machine holding a product
+Coin/Note      → money inserted (denomination)
+Inventory      → tracks product stock per slot
+CashRegister   → holds coins for making change
+VendingMachine → the whole system`,
+classify:`ENTITIES (just data, no logic):
+  Product    { id, name, price, quantity }
+
+ENUMS (fixed values):
+  VMState     { IDLE, HAS_MONEY, DISPENSING }
+  Denomination { 1, 2, 5, 10, 20, 50, 100 }
+
+SERVICES (business logic):
+  ChangeService  { makeChange(amount, coinStock) → coins }
+    ├── GreedyChange   { makeChange() }  — largest first
+    └── ExactChange    { makeChange() }  — require exact
+
+MANAGER (State Machine):
+  VendingMachine (Singleton + State)
+    { state, balance, products Map, coinStock Map }
+    { insertMoney(), selectProduct(), refund() }
+
+  STATE CLASSES (if full State Pattern):
+    IdleState          → only accepts insertMoney()
+    MoneyInsertedState → accepts selectProduct() or refund()
+    DispensingState    → only accepts collectProduct()`,
+ownership:`┌──────────────────────┬────────────────┬─────────────────────────────┐
+│ Method               │ Owner          │ WHY                         │
+├──────────────────────┼────────────────┼─────────────────────────────┤
+│ isAvailable()        │ Product        │ checks self.quantity > 0    │
+│ dispense()           │ Product        │ decrements self.quantity    │
+│ makeChange(amt)      │ VendingMachine │ greedy on its own coinStock │
+│ insertMoney(amt)     │ VendingMachine │ updates self.balance + state│
+│ selectProduct(slot)  │ VendingMachine │ coordinates validate+dispense│
+│ refund()             │ VendingMachine │ returns self.balance, resets│
+└──────────────────────┴────────────────┴─────────────────────────────┘
+
+KEY: VendingMachine is both Manager and State Machine.
+     Product only knows about itself. Machine orchestrates.`,
+patternsWhy:`STATE (CLASSIC!) — VendingMachine states
+  WHY: this IS the textbook State Pattern question.
+       IDLE: only insertMoney() valid.
+       HAS_MONEY: only selectProduct() or refund() valid.
+       DISPENSING: only collectProduct() valid.
+       Wrong action in wrong state → error.
+
+STRATEGY — ChangeService (Greedy / ExactChange)
+  WHY: when low on coins, switch to ExactChange mode.
+       "Exact change only" sign = strategy swap.
+
+SINGLETON — VendingMachine
+  WHY: one physical machine = one instance.
+       Two instances would deplete same inventory twice.
+
+OBSERVER — Notify operator when stock low
+  WHY: machine alerts vendor to refill without polling.`,
+edgeCases:`1. Insufficient money  → show "Insert Rs X more"
+2. Out of stock        → show error, allow re-selection
+3. Can't make change   → show "Exact change only" before buy
+4. User cancels        → refund all inserted money
+5. Power failure       → save state to persist, recover on boot
+6. Machine jammed      → enter MAINTENANCE state
+7. Coin slot full      → reject further coins
+8. Multiple products   → allow sequential purchases same session`,
+extend:`Add card/UPI payment?
+  → Create CardPayment, UPIPayment implement PaymentStrategy
+  → VendingMachine uses PaymentStrategy interface
+  → ZERO changes to Product, Inventory, ChangeService ✅
+
+Add touchscreen UI?
+  → Create TouchScreenDisplay implements Display interface
+  → Replaces button-based selection
+  → ZERO changes to VendingMachine logic, Product ✅
+
+Add remote monitoring (IoT)?
+  → Create MonitoringService { reportStock(), reportCash() }
+  → Observer: low stock/cash triggers remote alert
+  → ZERO changes to Product, VendingMachine core ✅`,
+evaluates:`✅ "State pattern is the star — classic exam question" (State)
+✅ "Each state defines valid actions" (invalid → error)
+✅ "Change-making is coin-change greedy problem" (algo)
+✅ "Product owns dispense, not VendingMachine" (SRP)
+✅ "Exact change mode = strategy swap" (Strategy)
+✅ "Mentioned power failure + state recovery" (production)
+✅ "Inventory separate from cash handling"
+✅ "State transitions are explicit and guarded"`
+},
+7:{
+problem:`Snake and Ladder board game for multiple players.
+Players take turns → roll dice → move → hit snake (down) or ladder (up) → first to 100 wins.`,
+userDoes:`1. Start game     → need: new Game(players, board)
+2. Roll dice      → need: dice.roll()
+3. Move piece     → need: updatePosition(roll)
+4. Check snake    → need: board.getFinalPosition(pos)
+5. Check ladder   → need: board.getFinalPosition(pos)
+6. Check winner   → need: hasWon(player)
+7. Next turn      → need: nextTurn()`,
+things:`Player  → participant (name, position on board)
+Board   → 100-cell grid with snakes and ladders
+Snake   → head→tail mapping (go DOWN)
+Ladder  → bottom→top mapping (go UP)
+Dice    → random number generator (1-6)
+Game    → orchestrates turns and rules`,
+classify:`ENTITIES (just data, no logic):
+  Player    { id, name, position }
+  Board     { size, snakes Map, ladders Map }
+  Dice      { faces, roll() }
+
+ENUMS (fixed values):
+  GameStatus  { IN_PROGRESS, FINISHED }
+
+SERVICES (none needed — simple game):
+  (Board itself handles position resolution)
+
+MANAGER (orchestrates everything):
+  Game
+    { board, players[], dice, currentTurnIdx, winner }
+    { playTurn(), nextTurn(), isGameOver() }`,
+ownership:`┌──────────────────────┬─────────┬──────────────────────────────────┐
+│ Method               │ Owner   │ WHY                              │
+├──────────────────────┼─────────┼──────────────────────────────────┤
+│ roll()               │ Dice    │ only needs self.faces            │
+│ addSnake(head, tail) │ Board   │ modifies its own snakes Map     │
+│ addLadder(bot, top)  │ Board   │ modifies its own ladders Map    │
+│ getFinalPosition(pos)│ Board   │ resolves cascading snakes/ladders│
+│ playTurn()           │ Game    │ coordinates dice + board + player│
+│ nextTurn()           │ Game    │ manages turn order + extra turns │
+│ isGameOver()         │ Game    │ checks if winner exists          │
+└──────────────────────┴─────────┴──────────────────────────────────┘
+
+KEY: Board resolves positions. Dice is independent.
+     Game coordinates the turn-based flow.`,
+patternsWhy:`STRATEGY — DiceStrategy (SingleDie / DoubleDice / CrookedDice)
+  WHY: swap dice for testing. CrookedDice always returns 6
+       for deterministic tests. No changes to Game.
+
+OBSERVER — Notify all players of each move
+  WHY: UI updates for all players after each turn.
+       Decouples game logic from rendering.
+
+TEMPLATE METHOD — Game flow is fixed
+  WHY: roll → move → resolve → check win → next turn.
+       Always same skeleton. Dice/board/rules can vary.`,
+edgeCases:`1. Overshoot 100       → can't move, stay in place (need exact)
+2. Cascading snakes    → land on snake tail, another snake there
+3. Cascading ladders   → getFinalPosition loops until stable
+4. Roll 6 = extra turn → three 6s in a row = skip turn
+5. Player disconnects  → skip their turns or remove from game
+6. Snake at 100        → technically possible, prevents winning
+7. Same position       → multiple players can occupy same cell
+8. Min 2 players       → validate in constructor`,
+extend:`Add power-ups (shield from snake, double roll)?
+  → Create PowerUp { type, apply(player, roll) }
+  → Board has powerUps Map at certain cells
+  → ZERO changes to Dice, Player, core Game loop ✅
+
+Add multiplayer online?
+  → Create GameServer { createRoom(), joinRoom(), sync() }
+  → Uses existing Game internally, syncs state to clients
+  → ZERO changes to Board, Dice, Player ✅
+
+Add custom board editor?
+  → Create BoardBuilder { setSize(), addSnake(), addLadder() }
+  → Builder pattern for flexible board creation
+  → ZERO changes to Game, Player, Dice ✅`,
+evaluates:`✅ "Board resolves cascading snakes/ladders" (while loop)
+✅ "Dice is independent — testable with mock" (DI)
+✅ "Game doesn't know snake/ladder positions" (SRP)
+✅ "Extra turn on 6, skip on triple 6" (rule coverage)
+✅ "Overshoot = stay in place" (edge case)
+✅ "getFinalPosition handles chain reactions"
+✅ "Clean separation: Board data, Dice random, Game flow"
+✅ "Simple but shows proper class ownership thinking"`
+},
+8:{
+problem:`Two-player chess with standard rules on 8x8 board.
+Players alternate turns → select piece → move → capture → check/checkmate → game over.`,
+userDoes:`1. Start game     → need: new Game()
+2. Select piece    → need: getPiece(row, col)
+3. See valid moves → need: piece.getValidMoves(board)
+4. Move piece      → need: game.movePiece(from, to)
+5. Check status    → need: isCheck(), isCheckmate()
+6. Undo move       → need: undoLastMove()`,
+things:`Piece    → abstract (color, position) — King, Queen, Rook, Bishop, Knight, Pawn
+Board    → 8x8 grid holding pieces
+Player   → participant (name, color, pieces[])
+Move     → record (piece, from, to, captured)
+Game     → orchestrates turns, rules, win condition`,
+classify:`ENTITIES (just data, no logic):
+  Piece (abstract) { color, row, col, isAlive }
+    ├── King    { hasMoved, getValidMoves(board) }
+    ├── Queen   { getValidMoves(board) }  — rook + bishop
+    ├── Rook    { hasMoved, getValidMoves(board) }
+    ├── Bishop  { getValidMoves(board) }
+    ├── Knight  { getValidMoves(board) }  — L-shape
+    └── Pawn    { hasMoved, getValidMoves(board) }
+  Board      { grid[8][8], place(), move() }
+  Player     { name, color, pieces[] }
+
+ENUMS (fixed values):
+  Color       { WHITE, BLACK }
+  GameStatus  { ACTIVE, CHECK, CHECKMATE, STALEMATE, DRAW }
+
+SERVICES (business logic):
+  MoveValidator { isValidMove(), isCheck(), isCheckmate() }
+
+MANAGER (orchestrates everything):
+  Game
+    { board, players, currentTurn, moveHistory[], status }
+    { movePiece(), undoMove(), getStatus() }`,
+ownership:`┌──────────────────────┬───────────────┬───────────────────────────────┐
+│ Method               │ Owner         │ WHY                           │
+├──────────────────────┼───────────────┼───────────────────────────────┤
+│ getValidMoves(board) │ Piece subclass│ each piece has unique movement│
+│ place(piece)         │ Board         │ modifies its own grid         │
+│ move(from, to)       │ Board         │ updates grid + captures       │
+│ isCheck(color, board)│ MoveValidator │ needs all pieces (multi-obj)  │
+│ isCheckmate(color)   │ MoveValidator │ simulates all moves (complex) │
+│ movePiece(from, to)  │ Game          │ coordinates validate+move+turn│
+│ undoMove()           │ Game          │ pops from moveHistory[]       │
+└──────────────────────┴───────────────┴───────────────────────────────┘
+
+KEY: Each Piece subclass overrides getValidMoves().
+     Board is just a grid. Game orchestrates turns.`,
+patternsWhy:`INHERITANCE — Piece → King/Queen/Rook/Bishop/Knight/Pawn
+  WHY: each piece moves differently. Polymorphism lets Game
+       call piece.getValidMoves() without knowing the type.
+
+COMMAND — Each Move is a Command object
+  WHY: supports undo/redo. moveHistory[] stores all commands.
+       Undo = pop last move, reverse it.
+
+STRATEGY — AI move generation (Random / Minimax)
+  WHY: swap AI difficulty without changing Game code.
+       RandomStrategy for easy, MinimaxStrategy for hard.
+
+FACTORY — PieceFactory creates initial board setup
+  WHY: complex creation logic (16 pieces per color).
+       Encapsulates placement rules.`,
+edgeCases:`1. Stalemate          → not in check but no valid moves = draw
+2. Threefold repeat   → same position 3 times = draw
+3. 50-move rule       → no captures/pawn moves in 50 = draw
+4. Castling           → king+rook never moved, no pieces between
+5. En Passant         → only right after opponent double pawn move
+6. Pawn promotion     → reach end row → choose Queen/Rook/Bishop/Knight
+7. Self-check         → can't make move that puts own king in check
+8. Time control       → chess clock per player`,
+extend:`Add chess clock (timed games)?
+  → Create ChessClock { start(), pause(), isExpired() }
+  → Game checks clock on each move
+  → ZERO changes to Board, Piece subclasses ✅
+
+Add move notation (PGN export)?
+  → Create NotationService { toAlgebraic(move), exportPGN() }
+  → Reads moveHistory[], formats as standard notation
+  → ZERO changes to Game, Board, Piece ✅
+
+Add AI opponent?
+  → Create AIPlayer { chooseMove(board) } with MinimaxStrategy
+  → Implements same interface as human player
+  → ZERO changes to Board, Piece, Game rules ✅`,
+evaluates:`✅ "Each Piece overrides getValidMoves — polymorphism" (Inheritance)
+✅ "Board is just a grid, not business logic" (SRP)
+✅ "Move as Command object — enables undo/redo" (Command)
+✅ "Check/checkmate = simulate all moves" (algorithm insight)
+✅ "Mentioned castling, en passant, promotion" (completeness)
+✅ "Stalemate and draw conditions covered" (edge cases)
+✅ "Game doesn't know how Knight moves" (abstraction)
+✅ "MoveValidator separate from Game" (SRP)`
+},
+9:{
+problem:`Hotel booking system with rooms, reservations, check-in/out.
+Guest searches rooms → books for dates → checks in → stays → checks out → pays.`,
+userDoes:`1. Search rooms     → need: findAvailable(dates, type)
+2. Book room        → need: book(guest, roomId, dates)
+3. Check in         → need: checkIn(reservationId)
+4. Stay (services)  → need: addCharge(reservationId, amount)
+5. Check out        → need: checkOut(reservationId)
+6. Pay bill         → need: processPayment(total)
+7. Cancel (optional)→ need: cancel(reservationId)`,
+things:`Room         → hotel room (type, floor, price, status)
+Reservation  → booking record (guest, room, dates, status)
+Guest        → customer (name, phone, reservations[])
+Bill         → nights x rate + extras
+Payment      → cash/card/UPI
+Hotel        → the whole system`,
+classify:`ENTITIES (just data, no logic):
+  Room         { id, type, floor, pricePerNight, status }
+  Reservation  { id, guest, room, checkIn, checkOut, status }
+  Guest        { id, name, phone, reservations[] }
+
+ENUMS (fixed values):
+  RoomType          { STANDARD, DELUXE, SUITE, PENTHOUSE }
+  RoomStatus        { AVAILABLE, OCCUPIED, CLEANING, MAINTENANCE }
+  ReservationStatus { CONFIRMED, CHECKED_IN, COMPLETED, CANCELLED }
+
+SERVICES (business logic):
+  SearchService   { findAvailable(dates, type) → rooms[] }
+  PricingService  { calculate(reservation) → total }
+  CancellationPolicy { getRefund(reservation) → percent }
+    ├── FlexiblePolicy   { getRefund() }  — 100% if >24hr
+    ├── ModeratePolicy   { getRefund() }  — 50% if >12hr
+    └── StrictPolicy     { getRefund() }  — 0% always
+
+MANAGER (orchestrates everything):
+  Hotel (Singleton)
+    { rooms[], reservations[], pricingService }
+    { book(), checkIn(), checkOut(), cancel() }`,
+ownership:`┌──────────────────────┬───────────────────┬────────────────────────────┐
+│ Method               │ Owner             │ WHY                        │
+├──────────────────────┼───────────────────┼────────────────────────────┤
+│ getNights()          │ Reservation       │ only needs self.dates      │
+│ isOverlapping(dates) │ Reservation       │ checks self dates vs input │
+│ findAvailable()      │ Hotel/SearchSvc   │ scans rooms + reservations │
+│ calculate(resv)      │ PricingService    │ nights x rate (business)   │
+│ getRefund(resv)      │ CancellationPolicy│ policy rules (strategy)    │
+│ book() FLOW          │ Hotel             │ coordinates search + create│
+│ checkIn() FLOW       │ Hotel             │ validates + updates status │
+│ checkOut() FLOW      │ Hotel             │ calculates + collects pay  │
+└──────────────────────┴───────────────────┴────────────────────────────┘
+
+KEY: Date-range overlap check is the core algorithm.
+     Overlap: A.start &lt; B.end AND A.end &gt; B.start.`,
+patternsWhy:`STRATEGY — CancellationPolicy (Flexible/Moderate/Strict)
+  WHY: different room types have different cancel rules.
+       Suite = strict. Standard = flexible. Just swap policy.
+
+FACTORY — RoomFactory creates rooms of different types
+  WHY: each type has different price, amenities, floor rules.
+       Encapsulates creation logic.
+
+OBSERVER — Notify housekeeping on checkout
+  WHY: room needs cleaning when guest leaves.
+       Notify guest when room is ready for early check-in.
+
+STATE — Room status (AVAILABLE/OCCUPIED/CLEANING/MAINTENANCE)
+  WHY: can't book MAINTENANCE room. Can't check into CLEANING.
+       Status determines valid actions.`,
+edgeCases:`1. Overbooking        → sell 105% capacity (airline-style)
+2. Room not cleaned   → status CLEANING between checkouts
+3. Early check-in     → charge extra or upgrade if available
+4. Late checkout      → charge half-day extra
+5. No-show            → charge first night, release room
+6. Group booking      → block multiple rooms atomically
+7. Seasonal pricing   → PricingStrategy by date range
+8. Room upgrade       → same price, better room if available`,
+extend:`Add room service / minibar charges?
+  → Create ChargeService { addCharge(reservationId, item, amt) }
+  → Bill aggregates room + extras at checkout
+  → ZERO changes to Room, Reservation, Hotel core ✅
+
+Add loyalty program / points?
+  → Create LoyaltyService { earnPoints(), redeemPoints() }
+  → PricingService checks points before calculating
+  → ZERO changes to Room, Reservation, Guest ✅
+
+Add multi-property chain (Marriott-style)?
+  → Create HotelChain { hotels[], searchAcross(dates, city) }
+  → Each Hotel remains independent, chain aggregates
+  → ZERO changes to Room, Reservation, PricingService ✅`,
+evaluates:`✅ "Date overlap check is correct: A.start &lt; B.end AND A.end &gt; B.start"
+✅ "Room status includes CLEANING — real-world detail"
+✅ "Cancellation policy as Strategy — extensible"
+✅ "Reservation.getNights() on entity, not Hotel" (SRP)
+✅ "PricingService separate from Hotel" (SRP)
+✅ "No-show and overbooking mentioned" (production thinking)
+✅ "Observer for housekeeping notifications"
+✅ "Seasonal pricing = strategy swap, not if/else"`
+},
+10:{
+problem:`Online shopping platform like Amazon.
+Users browse products, add to cart, place orders, pay, and track delivery.
+Multi-step: search → cart → checkout → payment → fulfillment → delivery.`,
+userDoes:`1. Browse/search      → need: search(query, filters)
+2. Add to cart        → need: cart.add(product, qty)
+3. View cart          → need: cart.getItems()
+4. Checkout           → need: checkout(cart, address)
+5. Pay                → need: pay(orderId, method)
+6. Track order        → need: getOrderStatus(orderId)
+7. Cancel/return      → need: cancel(orderId) / return(orderId)
+8. Leave review       → need: addReview(productId, rating, text)`,
+things:`Product      → item for sale (name, price, stock, category)
+CartItem     → product + quantity in user's cart
+Cart         → per-user collection of cart items
+Order        → confirmed purchase (items, total, address, status)
+Review       → rating + text on a product
+User         → the shopper (name, address, payment methods)
+Payment      → charge against an order
+Shipment     → tracking info for a dispatched order`,
+classify:`ENTITIES (just data, no logic):
+  Product     { id, name, price, stock, category, avgRating }
+  CartItem    { product, quantity }
+  Cart        { userId, items Map }
+  Order       { orderId, userId, items[], total, address, status, createdAt }
+  Review      { userId, productId, rating, text, timestamp }
+
+ENUMS (fixed values):
+  OrderStatus    { PENDING, CONFIRMED, SHIPPED, DELIVERED, CANCELLED, RETURNED }
+  PaymentMethod  { CREDIT_CARD, UPI, NET_BANKING, COD, WALLET }
+  Category       { ELECTRONICS, CLOTHING, BOOKS, GROCERY }
+
+SERVICES (business logic):
+  SearchService       { search(query, filters) → Product[] }
+  InventoryService    { check(productId, qty), deduct(productId, qty), restore() }
+  PaymentService      { charge(amount, method) → bool }  ← Strategy interface
+    ├── CreditCardPayment { charge() }
+    ├── UPIPayment        { charge() }
+    └── WalletPayment     { charge() }
+  ShippingStrategy    { calculateCost() + estimateTime() }
+    ├── StandardShipping  { 5-7 days, free }
+    ├── ExpressShipping   { 2-3 days, ₹99 }
+    └── SameDayShipping   { same day, ₹199 }
+  NotificationService { sendConfirmation(), sendShipped(), sendDelivered() }
+
+MANAGER (orchestrates):
+  OrderService  { checkout(), confirmPayment(), cancel(), updateStatus() }`,
+ownership:`METHOD                │ OWNER            │ WHY
+──────────────────────┼──────────────────┼──────────────────────────
+add(product, qty)     │ Cart             │ Cart's OWN data (its items)
+remove(productId)     │ Cart             │ Cart's OWN data
+getTotal(products)    │ Cart             │ Needs product prices + its qtys
+isAvailable(qty)      │ Product          │ Product's OWN stock data
+deduct(qty)           │ Product          │ Product's OWN stock mutation
+search(query)         │ SearchService    │ Business rule (indexing, ranking)
+checkout(cart, addr)  │ OrderService     │ Multi-step: validate→create→charge
+confirmPayment(id)    │ OrderService     │ Multi-step: deduct stock→confirm
+cancel(orderId)       │ OrderService     │ Multi-step: restore stock→refund
+charge(amount)        │ PaymentService   │ Business rule (gateway integration)
+updateStatus(status)  │ Order            │ Order's OWN state transition
+calculateCost()       │ ShippingStrategy │ Business rule (distance, weight)`,
+patternsWhy:`1. STRATEGY → PaymentService + ShippingStrategy
+   WHY: Multiple payment methods and shipping tiers, same interface, swap at runtime
+   Without it: giant if-else for each payment type AND each shipping tier
+
+2. STATE → Order state machine
+   WHY: Order goes through PENDING→CONFIRMED→SHIPPED→DELIVERED with strict transitions
+   Without it: invalid transitions like DELIVERED→PENDING could happen
+
+3. OBSERVER → NotificationService
+   WHY: Order status changes trigger email/SMS/push to user automatically
+   Without it: OrderService must know about every notification channel
+
+4. FACTORY → PaymentMethodFactory
+   WHY: User selects "UPI" → factory returns correct processor
+   Without it: caller has to know how to construct each payment processor`,
+edgeCases:`• Item goes out of stock while in cart → show "Only 2 left" or remove at checkout
+• Two users buy last item simultaneously → optimistic locking on stock
+• Payment succeeds but confirmation fails → reconciliation job to fix
+• Payment timeout → don't deduct stock, allow retry with idempotency key
+• Price changes after adding to cart → show updated price at checkout
+• Coupon/discount code → validate at order creation, check expiry + usage limits
+• Partial cancellation → cancel 1 of 3 items, recalculate total, partial refund
+• COD order → deduct stock on confirmation, charge only on delivery
+• Address unserviceable → reject at checkout with message`,
+extend:`→ Wishlist                  (Wishlist entity, move-to-cart)
+→ Recommendation engine     (CollaborativeFilter / ContentBased Strategy)
+→ Flash sale / limited stock (Queue + rate limiter for high-demand items)
+→ Subscription orders       (RecurringOrder + cron scheduler)
+→ Seller dashboard          (SellerService, inventory management)
+→ Return &amp; refund workflow   (ReturnRequest entity + RefundService)
+→ Loyalty points             (PointsService, earn on purchase, redeem on checkout)`,
+evaluates:`✅ Stock deducted ONLY after payment succeeds (not at cart-add)
+✅ Order state machine prevents invalid transitions
+✅ Cart is per-user and ephemeral; Order is permanent record
+✅ Strategy pattern for payments AND shipping
+✅ Observer for notifications decoupled from order logic
+✅ Concurrency handled for last-item race condition
+✅ Idempotency for payment retries
+✅ Clean separation: Cart (entity) vs OrderService (manager) vs PaymentService (service)`
+},
+11:{
+problem:`Multi-elevator system in a building.
+Users press UP/DOWN on a floor, system assigns best elevator.
+Elevator moves floor-by-floor, picks up and drops off passengers.`,
+userDoes:`1. Press button on floor → need: request(floor, direction)
+2. Enter elevator       → need: addDestination(floor)
+3. Ride to floor        → need: elevator.move()
+4. Exit at destination  → need: removeDestination(floor)
+5. System assigns best  → need: strategy.assign(request, elevators)
+6. System steps time    → need: controller.step()`,
+things:`Request      → a button press (which floor, UP or DOWN)
+Elevator     → the cabin (current floor, direction, queue of destinations)
+Floor        → a level in the building
+Controller   → the brain that coordinates all elevators
+Strategy     → the algorithm that picks which elevator serves which request`,
+classify:`ENTITIES (just data, no logic):
+  Request     { floor, direction, timestamp }
+  Elevator    { id, currentFloor, direction, state, destinations Set }
+
+ENUMS (fixed values):
+  Direction      { UP, DOWN, IDLE }
+  ElevatorState  { IDLE, MOVING, DOOR_OPEN, MAINTENANCE }
+
+SERVICES (business logic):
+  SchedulingStrategy  { assign(request, elevators[]) → Elevator }  ← Strategy interface
+    ├── FCFSStrategy      { assign() }  — first come first served
+    ├── NearestStrategy   { assign() }  — closest going same direction
+    └── LOOKStrategy      { assign() }  — serve all in current direction, then reverse
+
+MANAGER (orchestrates):
+  ElevatorController  { elevators[], pendingRequests[], request(), step() }`,
+ownership:`METHOD                │ OWNER               │ WHY
+──────────────────────┼─────────────────────┼───────────────────────────
+addDestination(floor) │ Elevator            │ Elevator's OWN queue
+move()                │ Elevator            │ Elevator's OWN position/state
+isIdle()              │ Elevator            │ Elevator's OWN state check
+assign(req, elevs)    │ SchedulingStrategy  │ Business rule (algorithm logic)
+request(floor, dir)   │ ElevatorController  │ Multi-step: create req→pick elevator→assign
+step()                │ ElevatorController  │ Multi-step: move all elevators one tick
+getDistance(a, b)     │ SchedulingStrategy  │ Utility for assignment calculation`,
+patternsWhy:`1. STRATEGY → SchedulingStrategy
+   WHY: Multiple scheduling algorithms (FCFS, Nearest, LOOK), swap without touching elevator or controller
+   Without it: hardcoded algorithm, can't A/B test or change based on time of day
+
+2. OBSERVER → Elevator notifies Controller on arrival
+   WHY: Controller needs to know when elevator reaches a floor to process pickups/dropoffs
+   Without it: Controller must poll every elevator every tick
+
+3. STATE → Elevator states
+   WHY: Behavior depends on state: IDLE can accept, MOVING can't open doors, MAINTENANCE rejects all
+   Without it: complex if-else to check what actions are valid
+
+4. SINGLETON → ElevatorController
+   WHY: One controller manages all elevators in the building
+   Without it: conflicting assignments from multiple controllers`,
+edgeCases:`• All elevators busy → queue request, assign when one frees up
+• Elevator at weight capacity → skip pickup, send next elevator
+• Emergency stop → all elevators to nearest floor + open doors
+• Fire mode → all elevators go to ground floor, doors open, disable buttons
+• VIP elevator → reserved for certain floors (penthouse, executives)
+• Maintenance mode → take one elevator offline without disrupting service
+• Power outage → battery backup moves all to nearest floor
+• Peak hours (morning rush) → park idle elevators at lobby
+• Multiple requests same floor same direction → batch into one stop`,
+extend:`→ Priority floors          (lobby gets priority during rush hour)
+→ Destination dispatch     (enter floor# at lobby, system groups efficiently)
+→ Energy saving mode       (reduce active elevators at night)
+→ Analytics dashboard      (avg wait time, trips/hour, peak patterns)
+→ Accessibility features   (hold door longer, audio announcements)
+→ Freight elevator mode    (dedicated for large loads, manual control)`,
+evaluates:`✅ Strategy pattern is THE star — swap scheduling algorithm cleanly
+✅ Elevator owns its own movement and state
+✅ Controller orchestrates but doesn't contain algorithm logic
+✅ LOOK algorithm mentioned (real-world disk scheduling analogy)
+✅ State machine for elevator (IDLE, MOVING, DOOR_OPEN)
+✅ Edge cases show physical-world awareness (weight, fire, power)
+✅ Request queuing for when all elevators are busy`
+},
+12:{
+problem:`Expense sharing app like Splitwise.
+Friends share expenses — one person pays, others owe their share.
+Track who owes whom, simplify debts to minimize transactions.`,
+userDoes:`1. Create group        → need: createGroup(name, members)
+2. Add expense         → need: addExpense(payer, amount, splitType, participants)
+3. View balances       → need: getBalance(userId)
+4. Settle debt         → need: settle(fromUserId, toUserId, amount)
+5. Simplify debts      → need: simplifyDebts()
+6. View expense history → need: getExpenses(groupId)`,
+things:`User         → a person in the group
+Group        → collection of users sharing expenses
+Expense      → a payment made by one person for many
+Split        → each person's share of an expense
+Balance      → net amount owed between two people
+Settlement   → a payment to clear a debt`,
+classify:`ENTITIES (just data, no logic):
+  User        { id, name, email }
+  Group       { id, name, members[] }
+  Expense     { id, payerId, amount, description, splits[], createdAt }
+  Split       { userId, share }
+
+ENUMS (fixed values):
+  SplitType   { EQUAL, EXACT, PERCENT }
+
+SERVICES (business logic):
+  SplitStrategy    { calculate(amount, participants) → Split[] }  ← Strategy interface
+    ├── EqualSplit   { calculate() }  — amount / N per person
+    ├── ExactSplit   { calculate() }  — custom amounts per person
+    └── PercentSplit { calculate() }  — custom percentages per person
+  BalanceService   { updateBalances(expense), getNetBalances() }
+  SimplifyService  { simplifyDebts(balances) → minimized Transaction[] }
+
+MANAGER (orchestrates):
+  ExpenseManager   { groups[], expenses[], addExpense(), getBalance(), simplifyDebts() }`,
+ownership:`METHOD                    │ OWNER           │ WHY
+──────────────────────────┼─────────────────┼─────────────────────────────
+calculate(amount, users)  │ SplitStrategy   │ Business rule (split algorithm)
+addExpense(payer, ...)    │ ExpenseManager  │ Multi-step: split→record→update balances
+getBalance(userId)        │ ExpenseManager  │ Needs all pairwise balance data
+updateBalances(expense)   │ BalanceService  │ Business rule (pairwise tracking)
+simplifyDebts()           │ SimplifyService │ Business rule (graph algorithm)
+settle(from, to, amount)  │ ExpenseManager  │ Multi-step: validate→update→record`,
+patternsWhy:`1. STRATEGY → SplitStrategy
+   WHY: Three ways to split (equal, exact, percent) — same interface, different logic
+   Without it: if-else chain in addExpense for each split type
+
+2. OBSERVER → NotificationService
+   WHY: Notify users when a new expense is added affecting them
+   Without it: users must manually check for new expenses
+
+3. SINGLETON → ExpenseManager
+   WHY: One central manager for all groups and expenses
+   Without it: inconsistent state across multiple instances`,
+edgeCases:`• Split doesn't add up to total → reject with validation error
+• Rounding issues (₹100/3 = 33.33...) → last person absorbs remainder (₹33.34)
+• User not in group → can't be included in split
+• Negative expense (someone gives money back) → treated as reverse payment
+• Recurring expenses (monthly rent) → auto-create on schedule
+• Currency conversion for international groups → store base currency + convert
+• Settlement doesn't fully cover debt → partial settlement, update remaining
+• User leaves group → settle all debts first, then remove
+• Same expense added twice → dedup by amount+time+description`,
+extend:`→ Multi-currency support    (CurrencyConverter service, store in base currency)
+→ Receipt photo upload      (attach image to expense)
+→ Recurring expenses        (cron-based auto-creation for rent, subscriptions)
+→ Activity feed             (timeline of all group actions)
+→ Payment integration       (pay debts directly via UPI/PayPal)
+→ Analytics                 (spending by category, monthly summary)
+→ Expense categories        (food, travel, rent — for tracking trends)`,
+evaluates:`✅ Strategy pattern for split types (not hardcoded if-else)
+✅ Debt simplification algorithm (net balances + greedy matching)
+✅ Pairwise balance tracking (A:B → amount)
+✅ Rounding edge case handled for equal splits
+✅ Clean separation: SplitStrategy vs BalanceService vs ExpenseManager
+✅ Group-based expense isolation
+✅ Settlement as a first-class concept`
+},
+13:{
+problem:`Movie ticket booking system like BookMyShow.
+Users browse movies, select showtime, pick seats, hold seats temporarily, pay, and get tickets.
+Key challenge: preventing double-booking with temporary seat holds.`,
+userDoes:`1. Browse movies        → need: searchMovies(query, filters)
+2. Select showtime      → need: getShows(movieId, date)
+3. View seat map        → need: getSeats(showId)
+4. Select seats         → need: holdSeats(userId, showId, seatIds)
+5. Pay within timeout   → need: pay(bookingId, method)
+6. Get ticket           → need: confirmBooking(bookingId)
+7. Cancel booking       → need: cancelBooking(bookingId)`,
+things:`Movie        → the film (title, duration, genre, rating)
+Theater      → the cinema hall (name, screens)
+Show         → a specific screening (movie + theater + time + seats)
+Seat         → individual seat (row, number, type, status)
+Booking      → reservation record (user, show, seats, status, total)
+Ticket       → confirmed proof of booking
+Payment      → charge for the booking`,
+classify:`ENTITIES (just data, no logic):
+  Movie       { id, title, duration, genre, rating }
+  Show        { id, movieId, theaterId, startTime, seats[] }
+  Seat        { id, row, num, type, status, heldBy, holdExpiry }
+  Booking     { id, userId, showId, seats[], status, total, createdAt }
+
+ENUMS (fixed values):
+  SeatType    { REGULAR, PREMIUM, VIP, RECLINER }
+  SeatStatus  { AVAILABLE, HELD, BOOKED }
+  BookingStatus { HELD, CONFIRMED, CANCELLED, EXPIRED }
+
+SERVICES (business logic):
+  PricingService    { calculate(seats[]) → amount }
+  PricingStrategy   { getRate(seatType, showTime) }  ← Strategy interface
+    ├── RegularPricing   { weekday rates }
+    ├── WeekendPricing   { 1.5x markup }
+    └── PremierePricing  { 2x markup on release day }
+  PaymentService    { process(amount, method) → bool }
+
+MANAGER (orchestrates):
+  BookingSystem     { shows Map, bookings Map, holdSeats(), confirmBooking(), cleanupExpired() }`,
+ownership:`METHOD                    │ OWNER           │ WHY
+──────────────────────────┼─────────────────┼──────────────────────────────
+isAvailable()             │ Seat            │ Seat's OWN status check
+hold(userId)              │ Seat            │ Seat's OWN state mutation
+book()                    │ Seat            │ Seat's OWN state mutation
+release()                 │ Seat            │ Seat's OWN state mutation
+isHoldExpired()           │ Seat            │ Seat's OWN expiry check
+calculate(seats)          │ PricingService  │ Business rule (rate × seat type)
+holdSeats(user, show, ids)│ BookingSystem   │ Multi-step: validate→hold all→create booking
+confirmBooking(id)        │ BookingSystem   │ Multi-step: verify hold→charge→book seats
+cleanupExpiredHolds()     │ BookingSystem   │ Multi-step: scan→release expired seats`,
+patternsWhy:`1. STATE → Seat state machine
+   WHY: Seat goes AVAILABLE → HELD (5 min TTL) → BOOKED with strict transitions
+   Without it: no temporary reservation, two users could pay for same seat
+
+2. STRATEGY → PricingStrategy
+   WHY: Different rates for weekday/weekend/premiere — swap pricing rules per show
+   Without it: hardcoded pricing that can't adapt to occasion
+
+3. OBSERVER → NotificationService
+   WHY: Notify waitlisted users when held seats expire and become available
+   Without it: users must keep refreshing the seat map
+
+4. SINGLETON → BookingSystem
+   WHY: One system manages all shows and bookings — prevents conflicting holds
+   Without it: race conditions between multiple booking instances`,
+edgeCases:`• Two users select same seat simultaneously → first hold() wins, second gets error
+• User doesn't pay within 5 minutes → auto-release seats (background cleanup job)
+• Payment fails after hold → release seats + show error, seats become available again
+• Partial booking (3 of 4 seats available) → atomic: hold ALL or NONE
+• Show time already passed → can't book, return error
+• Refund/cancellation → full refund if > 2hrs before show, 50% if 1-2hrs, 0 if &lt; 1hr
+• Adjacent seat preference → try to find N consecutive seats in same row
+• Theater capacity → sold-out shows should be clearly marked
+• Network timeout during hold → client retries, idempotency key prevents double-hold`,
+extend:`→ Waitlist system           (queue per show, notify when seats free)
+→ Combo offers              (popcorn + drink with ticket, BundleService)
+→ Multiple cities/regions   (location-based theater filtering)
+→ Loyalty rewards           (points per booking, redeem for free tickets)
+→ Group booking             (reserve block of seats for events)
+→ Rating &amp; reviews          (post-show, ReviewService)
+→ Dynamic pricing           (surge on high-demand shows, price drops for empty shows)`,
+evaluates:`✅ HOLD mechanism is THE key insight (temporary lock before payment)
+✅ 5-minute TTL prevents permanently held seats
+✅ Atomic hold: all-or-none for multiple seats
+✅ Background cleanup for expired holds
+✅ Seat owns its own state (isAvailable, hold, book, release)
+✅ PricingService separate from BookingSystem
+✅ Strategy for pricing variants (weekday vs weekend)
+✅ Concurrency handled at seat level (first hold wins)`
+},
+14:{
+problem:`Tic-Tac-Toe game on an NxN board.
+Two players take turns marking X and O. First to fill a complete row, column, or diagonal wins.
+Key trick: O(1) win detection using counters instead of scanning.`,
+userDoes:`1. Start game    → need: new Game(size)
+2. Make a move    → need: play(row, col)
+3. Check win      → need: board.checkWin(row, col, symbol)
+4. Check draw     → need: board.isFull()
+5. Undo move      → need: undo()
+6. Reset game     → need: reset()`,
+things:`Board        → the NxN grid (cells, move tracking, win counters)
+Player       → a participant (name, symbol X or O)
+Game         → the match (board, players, current turn, winner)
+Cell         → individual position on the board (row, col, symbol)`,
+classify:`ENTITIES (just data, no logic):
+  Player      { name, symbol }
+  Board       { size, grid[][], movesLeft, rows[], cols[], diag, antiDiag }
+
+ENUMS (fixed values):
+  Symbol      { X, O }
+  GameStatus  { IN_PROGRESS, WIN, DRAW }
+
+SERVICES (business logic):
+  WinStrategy  { checkWin(board, row, col, symbol) → bool }  ← Strategy interface
+    ├── StandardWin  { row/col/diagonal = N }
+    ├── ConnectFour  { 4 consecutive in any direction }
+    └── Gomoku       { 5 consecutive in any direction }
+
+MANAGER (orchestrates):
+  Game         { board, players[], currentTurnIdx, play(), undo(), reset() }`,
+ownership:`METHOD                   │ OWNER   │ WHY
+─────────────────────────┼─────────┼──────────────────────────────
+mark(row, col, symbol)   │ Board   │ Board's OWN grid mutation
+checkWin(row, col, sym)  │ Board   │ Board's OWN counter data
+isFull()                 │ Board   │ Board's OWN movesLeft count
+play(row, col)           │ Game    │ Multi-step: validate→mark→checkWin→switchTurn
+undo()                   │ Game    │ Multi-step: revert mark→revert counters→switchTurn
+reset()                  │ Game    │ Multi-step: clear board→reset state`,
+patternsWhy:`1. STRATEGY → WinStrategy
+   WHY: Different win conditions for different game variants (3-in-a-row, 4-in-a-row, 5-in-a-row)
+   Without it: hardcoded win check, can't reuse board for Connect Four or Gomoku
+
+2. FACTORY → GameFactory
+   WHY: GameFactory.create('TIC_TAC_TOE') vs .create('CONNECT_FOUR') with correct board size + win rule
+   Without it: caller must manually configure board size and strategy
+
+3. COMMAND → MoveCommand
+   WHY: Each move stored as command object, enabling undo/redo history
+   Without it: no way to undo moves without saving full board snapshots`,
+edgeCases:`• Cell already occupied → reject with error
+• Game already over → reject further moves
+• Board full with no winner → declare draw
+• Extensible to any NxN size (not just 3x3)
+• Undo last move → decrement counters, clear cell, switch turn back
+• AI opponent → Minimax algorithm with alpha-beta pruning
+• Multiple rounds → track wins/losses across games
+• Timer per turn → auto-forfeit if time expires`,
+extend:`→ AI opponent               (MinimaxStrategy with difficulty levels)
+→ Online multiplayer        (WebSocket turns, room-based matching)
+→ Larger boards             (5x5, 15x15 for Gomoku)
+→ Tournament mode           (bracket system, best-of-3)
+→ Move replay               (step through game history)
+→ Custom symbols/themes     (emoji, colors instead of X/O)`,
+evaluates:`✅ O(1) win check using row/col/diagonal COUNTERS is THE key insight
+✅ No need to scan entire row/col — just check if counter === N
+✅ Board owns mark() and checkWin() — its own data
+✅ Game orchestrates turn flow but delegates to Board
+✅ Works for any NxN (not hardcoded to 3x3)
+✅ movesLeft counter for efficient draw detection
+✅ Clean Player entity (just name + symbol, no game logic)`
+},
+15:{
+problem:`URL shortening service like bit.ly or TinyURL.
+User submits a long URL, system returns a short URL (e.g., short.ly/abc123).
+Short URL redirects to original. Track click analytics.`,
+userDoes:`1. Shorten a URL     → need: shorten(longUrl, customAlias?)
+2. Redirect           → need: resolve(shortCode) → longUrl
+3. View analytics     → need: getStats(shortCode)
+4. Delete short URL   → need: delete(shortCode)
+5. Set expiry         → need: shorten(longUrl, { expiresAt })
+6. Custom alias       → need: shorten(longUrl, { alias: "my-link" })`,
+things:`URL          → the mapping (short code → long URL)
+ShortCode    → the unique identifier (abc123)
+Click        → a visit event (timestamp, IP, referrer, userAgent)
+User         → optional — who created the short URL
+Analytics    → aggregated stats (total clicks, by day, by country)`,
+classify:`ENTITIES (just data, no logic):
+  URLMapping  { shortCode, longUrl, createdAt, expiresAt, userId, isActive }
+  Click       { shortCode, timestamp, ip, referrer, userAgent, country }
+
+ENUMS (fixed values):
+  CodeLength  { DEFAULT: 7 }
+
+SERVICES (business logic):
+  CodeGenerator    { generate() → shortCode }  ← Strategy interface
+    ├── Base62Generator   { generate() }  — random [a-zA-Z0-9]
+    ├── HashGenerator     { generate() }  — MD5/SHA256 of URL, take first 7 chars
+    └── CounterGenerator  { generate() }  — auto-increment ID → Base62
+  AnalyticsService { recordClick(click), getStats(shortCode) }
+  ExpiryService    { isExpired(mapping), cleanupExpired() }
+
+MANAGER (orchestrates):
+  URLShortener     { mappings Map, shorten(), resolve(), delete(), getStats() }`,
+ownership:`METHOD                    │ OWNER            │ WHY
+──────────────────────────┼──────────────────┼──────────────────────────────
+generate()                │ CodeGenerator    │ Business rule (encoding algorithm)
+shorten(longUrl, opts)    │ URLShortener     │ Multi-step: generate code→check collision→store
+resolve(shortCode)        │ URLShortener     │ Multi-step: lookup→check expiry→record click→return
+recordClick(click)        │ AnalyticsService │ Business rule (aggregation, geo lookup)
+getStats(shortCode)       │ AnalyticsService │ Business rule (query + aggregate click data)
+isExpired(mapping)        │ ExpiryService    │ Business rule (time comparison)
+cleanupExpired()          │ ExpiryService    │ Multi-step: scan all→delete expired`,
+patternsWhy:`1. STRATEGY → CodeGenerator
+   WHY: Multiple ways to generate short codes (random, hash, counter) — swap algorithm
+   Without it: hardcoded generation, can't switch to counter-based when scaling
+
+2. SINGLETON → URLShortener
+   WHY: One shortener service manages all mappings — prevents duplicate codes
+   Without it: two instances could generate same short code
+
+3. OBSERVER → AnalyticsService
+   WHY: Each resolve() triggers click recording without cluttering redirect logic
+   Without it: resolve() must handle analytics inline, violating SRP
+
+4. FACTORY → CodeGeneratorFactory
+   WHY: Select generator based on config (production uses Counter, dev uses Random)
+   Without it: conditional logic to pick generator scattered everywhere`,
+edgeCases:`• Collision: generated code already exists → retry with new code (max 3 attempts)
+• Same long URL shortened twice → return existing short code (dedup by URL hash)
+• Custom alias already taken → reject with error
+• Short URL expired → return 410 Gone, not 404
+• Malicious URL submitted → validate against blocklist before creating
+• High redirect traffic → cache hot mappings in memory (LRU cache)
+• Short code exhaustion (all 7-char combos used) → increase code length
+• Bot traffic → filter by user agent, rate limit by IP
+• URL with special characters → URL-encode before storing`,
+extend:`→ Custom domains            (user brings their own domain: mybrand.co/xyz)
+→ QR code generation        (generate QR for each short URL)
+→ Link-in-bio page          (user dashboard showing all their links)
+→ A/B testing               (rotate between two destination URLs)
+→ Password-protected links  (require password to access)
+→ Geo-based redirects       (US users → us.site.com, IN users → in.site.com)
+→ API rate limiting          (100 shortens/hour for free tier)`,
+evaluates:`✅ Code generation strategy is swappable (random vs hash vs counter)
+✅ Collision handling on code generation
+✅ Dedup: same long URL returns existing short code
+✅ Expiry support with background cleanup
+✅ Analytics decoupled via Observer
+✅ 301 (permanent) vs 302 (temporary) redirect distinction understood
+✅ Base62 encoding for URL-safe short codes
+✅ Caching layer for hot URLs mentioned`
+},
+16:{
+problem:`In-memory file system supporting files and directories.
+Create, read, write, delete, move files/folders. Navigate paths.
+Classic Composite pattern: files and directories share a common interface.`,
+userDoes:`1. Create file      → need: createFile(path, content)
+2. Create directory  → need: createDir(path)
+3. Read file         → need: read(path)
+4. Write to file     → need: write(path, content)
+5. Delete file/dir   → need: delete(path)
+6. List directory    → need: ls(path)
+7. Move/rename       → need: move(srcPath, destPath)
+8. Get size          → need: getSize(path)`,
+things:`FileSystemNode → base type (name, parent, creation time)
+File           → leaf node (content, extension, size)
+Directory      → container node (children, can hold files and other dirs)
+Path           → string like "/docs/notes.txt" that locates a node
+FileSystem     → the root + all operations`,
+classify:`ENTITIES (just data, no logic):
+  FileSystemNode  { name, parent, createdAt }           ← abstract base
+  File            { content, extension }                 ← extends Node
+  Directory       { children Map }                       ← extends Node
+
+ENUMS (fixed values):
+  NodeType        { FILE, DIRECTORY }
+
+SERVICES (business logic):
+  PathResolver    { resolve(path) → FileSystemNode }   — navigate "/" separated path
+  SearchService   { find(name), findByExtension(ext) } — DFS/BFS traversal
+
+MANAGER (orchestrates):
+  FileSystem      { root Directory, createFile(), createDir(), read(), write(),
+                    delete(), ls(), move(), getSize() }`,
+ownership:`METHOD                │ OWNER       │ WHY
+──────────────────────┼─────────────┼────────────────────────────────
+read()                │ File        │ File's OWN content
+write(content)        │ File        │ File's OWN content mutation
+getSize()             │ File        │ Returns content.length
+getSize()             │ Directory   │ Recursive sum of children sizes (Composite!)
+add(node)             │ Directory   │ Directory's OWN children management
+remove(name)          │ Directory   │ Directory's OWN children management
+list()                │ Directory   │ Directory's OWN children listing
+getPath()             │ FileSystemNode │ Walks up parent chain — node's OWN location
+resolve(path)         │ PathResolver│ Utility: split path → traverse tree
+createFile(path, data)│ FileSystem  │ Multi-step: resolve parent→create→add
+delete(path)          │ FileSystem  │ Multi-step: resolve→remove from parent
+move(src, dest)       │ FileSystem  │ Multi-step: resolve both→remove→add`,
+patternsWhy:`1. COMPOSITE → File + Directory both extend FileSystemNode
+   WHY: getSize() works uniformly — File returns content.length, Directory recurses over children
+   Without it: separate handling for files vs directories everywhere
+
+2. ITERATOR → Directory traversal
+   WHY: DFS/BFS search through entire tree for find-by-name, find-by-extension
+   Without it: manual recursive traversal code duplicated in every search method
+
+3. FACTORY → NodeFactory
+   WHY: NodeFactory.create(path) decides File vs Directory based on extension or trailing "/"
+   Without it: caller must decide which constructor to use
+
+4. TEMPLATE METHOD → FileSystem operations
+   WHY: Every operation follows resolve-path → validate → execute → return pattern
+   Without it: duplicated path-resolution and validation in every method`,
+edgeCases:`• Path doesn't exist → throw "Path not found" error
+• File/directory already exists at target → throw "Already exists" or overwrite?
+• Delete non-empty directory → recursive delete (like rm -rf) or reject?
+• Circular references via symlinks → detect cycles during traversal
+• File name validation → reject special characters (/, \\, null bytes)
+• Storage quota exceeded → throw "Disk full" error
+• Very deep nesting → path length limit (255 chars)
+• Concurrent read/write to same file → lock mechanism
+• Move directory into its own subtree → detect and reject (would create cycle)`,
+extend:`→ Symbolic links (symlinks)  (SymLink entity, resolve through link chain)
+→ Permissions system        (read/write/execute per user/group)
+→ File versioning           (keep history of writes, rollback)
+→ Compression               (CompressedFile that stores gzip content)
+→ Disk persistence          (serialize tree to actual disk, load on startup)
+→ Watcher / events          (Observer: notify when file changes)
+→ Trash / recycle bin       (soft delete, restore within 30 days)`,
+evaluates:`✅ Composite pattern is THE key — File and Directory share FileSystemNode base
+✅ getSize() works recursively on Directory (sums children)
+✅ PathResolver is the tricky utility (split "/" and traverse)
+✅ Inheritance natural: File vs Directory with different behavior
+✅ Directory.add() validates no duplicates
+✅ move() = remove from old parent + add to new parent
+✅ getPath() walks up parent chain for full path reconstruction`
+},
+17:{
+problem:`Social media platform like Twitter.
+Users post tweets, follow others, see a feed of posts from followed users.
+Like, retweet, comment. Real-time feed generation.`,
+userDoes:`1. Create post        → need: createPost(userId, content)
+2. Follow user        → need: follow(userId, targetId)
+3. Unfollow user      → need: unfollow(userId, targetId)
+4. View feed          → need: getFeed(userId, cursor, limit)
+5. Like post          → need: like(userId, postId)
+6. Retweet            → need: retweet(userId, postId)
+7. Comment            → need: comment(userId, postId, text)
+8. Search             → need: search(query)`,
+things:`User         → account (name, bio, followers, following, posts)
+Post         → a tweet (author, content, timestamp, likes, retweets, comments)
+Comment      → reply to a post (author, content, timestamp)
+Feed         → personalized timeline of posts from followed users
+Notification → alert for likes, comments, follows, mentions`,
+classify:`ENTITIES (just data, no logic):
+  User        { id, name, bio, followers Set, following Set, posts[] }
+  Post        { id, authorId, content, timestamp, likes Set, retweets Set, comments[] }
+  Comment     { id, authorId, content, timestamp }
+
+ENUMS (fixed values):
+  NotificationType  { LIKE, COMMENT, FOLLOW, MENTION, RETWEET }
+  FeedType          { CHRONOLOGICAL, RANKED, TRENDING }
+
+SERVICES (business logic):
+  FeedService         { generateFeed(userId) → Post[] }  ← Strategy interface
+    ├── ChronoFeed     { sort by timestamp descending }
+    ├── RankedFeed     { score by engagement + recency + relevance }
+    └── TrendingFeed   { popular posts across platform }
+  NotificationService { notify(userId, type, data) }
+  SearchService       { searchPosts(query), searchUsers(query) }
+
+MANAGER (orchestrates):
+  SocialNetwork       { users Map, posts Map, feeds Map,
+                         createPost(), follow(), unfollow(), getFeed(), like() }`,
+ownership:`METHOD                    │ OWNER           │ WHY
+──────────────────────────┼─────────────────┼──────────────────────────────
+createPost(userId, text)  │ SocialNetwork   │ Multi-step: create→store→fan-out to followers
+follow(userId, targetId)  │ SocialNetwork   │ Multi-step: update both users→notify target
+unfollow(userId, targetId)│ SocialNetwork   │ Multi-step: update both users' sets
+like(userId, postId)      │ SocialNetwork   │ Multi-step: add to likes Set→notify author
+getFeed(userId)           │ SocialNetwork   │ Multi-step: collect from feeds Map→paginate
+generateFeed(userId)      │ FeedService     │ Business rule (sorting/ranking algorithm)
+notify(userId, type)      │ NotificationService │ Business rule (channel selection, batching)
+searchPosts(query)        │ SearchService   │ Business rule (indexing, relevance ranking)`,
+patternsWhy:`1. STRATEGY → FeedService
+   WHY: Multiple feed algorithms (chronological, ranked, trending) — swap per user preference or A/B test
+   Without it: hardcoded feed logic, can't experiment with ranking
+
+2. OBSERVER → NotificationService
+   WHY: Like, comment, follow events trigger notifications without cluttering core logic
+   Without it: every action method must manually send notifications (tight coupling)
+
+3. ITERATOR → Cursor-based pagination
+   WHY: Feed is infinite scroll — cursor points to last seen post ID, load next N
+   Without it: offset-based pagination breaks when new posts insert at top
+
+4. SINGLETON → SocialNetwork
+   WHY: One platform instance manages all users and posts consistently
+   Without it: fan-out writes could be inconsistent across instances`,
+edgeCases:`• Celebrity with 10M followers posts → don't fan-out-on-write, pull-on-read instead (hybrid)
+• Normal user posts → fan-out-on-write to all followers' feeds (pre-compute)
+• Deleted post → remove from all feeds + show "This post was deleted"
+• Blocked user → hide from each other's feeds, prevent follow
+• Private account → follower requests need approval, posts hidden from non-followers
+• Spam detection → rate limit posts (max 10/hour), flag suspicious content
+• Edit post → update in-place with "edited" flag + edit timestamp
+• Hashtag trending → count hashtag uses within rolling time window
+• Self-follow → prevent, throw error
+• Duplicate like → Set prevents double-counting, idempotent operation`,
+extend:`→ Stories (24hr expiry)      (Story entity with TTL, auto-cleanup)
+→ Direct messages            (DM service, end-to-end encryption)
+→ Polls in posts             (Poll entity with options + vote counts)
+→ Bookmarks                  (save posts for later, per-user list)
+→ Lists                      (curated groups of users to follow)
+→ Verified badges            (verification status on User entity)
+→ Content moderation          (ML-based flagging + human review queue)
+→ Analytics for creators     (impressions, engagement rate, follower growth)`,
+evaluates:`✅ Fan-out-on-write for normal users, pull-on-read for celebrities (hybrid approach)
+✅ Cursor-based pagination (not offset — offsets break with new posts)
+✅ Likes and retweets as Sets prevent duplicates
+✅ Feed pre-computed per user for fast reads
+✅ Strategy pattern for feed ranking algorithm
+✅ Observer for decoupled notifications
+✅ Follow/unfollow updates both sides (user.following + target.followers)
+✅ Content moderation and spam detection as edge cases`
+},
+18:{
+problem:`Logging framework with multiple severity levels (DEBUG→FATAL).
+Logs route to multiple destinations (console, file, remote).
+Configurable format (JSON, plain text) and level-based filtering.`,
+userDoes:`1. Create logger     → need: new Logger() or Logger.getInstance()
+2. Configure level   → need: setLevel(WARN)
+3. Add destinations  → need: addSink(consoleSink), addSink(fileSink)
+4. Set format        → need: setFormatter(jsonFormatter)
+5. Log a message     → need: logger.info('msg', {context})
+6. Filter by level   → need: level check (INFO >= WARN? discard)
+7. Output to sinks   → need: sink.write(formatted)`,
+things:`LogEntry     → the log record (level, message, timestamp, metadata)
+Level        → severity: DEBUG &lt; INFO &lt; WARN &lt; ERROR &lt; FATAL
+Formatter    → transforms LogEntry into output string (JSON, plain)
+Sink         → output destination (console, file, remote server)
+Filter       → decides if entry meets minimum level threshold
+Logger       → the main interface developers interact with`,
+classify:`ENTITIES (just data, no logic):
+  LogEntry    { level, message, timestamp, context }
+
+ENUMS (fixed values):
+  Level       { DEBUG:0, INFO:1, WARN:2, ERROR:3, FATAL:4 }
+
+SERVICES (business logic):
+  Formatter (Strategy interface)
+    ├── JSONFormatter     { format(entry) → JSON string }
+    ├── PlainFormatter    { format(entry) → "[ts] [level] msg" }
+    └── PrettyFormatter   { format(entry) → colored output }
+  Sink (Observer interface)
+    ├── ConsoleSink  { write(formatted) }
+    ├── FileSink     { write(formatted), buffer[], flush() }
+    └── RemoteSink   { write(formatted), retry on failure }
+  Filter       { shouldLog(entryLevel, configLevel) → bool }
+
+MANAGER (orchestrates):
+  Logger  { level, sinks[], formatter, log(), addSink(), setLevel() }`,
+ownership:`METHOD               │ OWNER         │ WHY
+─────────────────────┼───────────────┼──────────────────────
+log(level, msg, ctx) │ Logger        │ Multi-step: filter→format→route
+setLevel(level)      │ Logger        │ Logger's OWN config
+addSink(sink)        │ Logger        │ Logger manages its destinations
+format(entry)        │ Formatter     │ Business rule (format logic)
+write(formatted)     │ Sink          │ Sink's OWN output mechanism
+flush()              │ FileSink      │ FileSink's OWN buffer
+shouldLog(lv, cfg)   │ Filter        │ Single comparison on its data
+info(msg, ctx)       │ Logger        │ Convenience: delegates to log()`,
+patternsWhy:`1. STRATEGY → Formatter (JSONFormatter, PlainFormatter, PrettyFormatter)
+   WHY: Same log entry, different output formats, swap at runtime
+   Without it: if-else chain in Logger for each format type
+
+2. OBSERVER → Sinks (ConsoleSink, FileSink, RemoteSink)
+   WHY: One log event, many destinations notified independently
+   Without it: Logger hardcoded to console only, can't add destinations
+
+3. BUILDER → Logger.builder().level(WARN).sink(fileSink).formatter(json).build()
+   WHY: Many optional config options, fluent construction
+   Without it: massive constructor with 6+ parameters
+
+4. SINGLETON → Logger.getInstance() or Logger.get('auth')
+   WHY: All modules share same logger config; one logger per app/name
+   Without it: each module creates its own logger with different config`,
+edgeCases:`• File rotation → max 10MB per file, keep last 5, rotate on threshold
+• Async writing → don't block main thread; buffer + flush in batches
+• Remote sink fails → fallback to console + retry with backoff
+• Sensitive data in logs → mask passwords, tokens, PII before formatting
+• Log flooding → same error 1000x/sec → rate-limit per message hash
+• Structured logging → JSON format for ELK/Splunk/Datadog ingestion
+• Correlation ID → trace a request across multiple log lines
+• Circular references in context → safe JSON.stringify with replacer`,
+extend:`→ Named loggers          (Logger.get('auth') with separate config)
+→ Log aggregation        (ship logs to Elasticsearch/CloudWatch)
+→ Sampling               (log only 1% of DEBUG in production)
+→ Child loggers          (inherit parent config, add extra context)
+→ Metrics integration    (count ERRORs per minute → alert)
+→ Hot reload config      (change log level without restart)`,
+evaluates:`✅ Strategy pattern for formatter (not hardcoded format logic)
+✅ Observer pattern for sinks (multiple destinations independently)
+✅ Level filtering is clean numeric comparison
+✅ Buffer + flush for file writes shows production awareness
+✅ LogEntry is pure data (no behavior leakage)
+✅ Logger orchestrates but doesn't do formatting or writing itself
+✅ Edge cases show real operational concerns (rotation, masking, flooding)`
+},
+19:{
+problem:`Rate limiter that controls API request frequency per user/IP/endpoint.
+Supports multiple algorithms (Token Bucket, Sliding Window, Fixed Window).
+Returns 429 Too Many Requests with Retry-After when limit exceeded.`,
+userDoes:`1. Configure limits     → need: configure(endpoint, strategy)
+2. Request arrives       → need: isAllowed(userId, endpoint)
+3. Check quota           → need: strategy.allow(userId)
+4. Allow or reject       → need: return 200 or 429 + Retry-After
+5. Refill/reset tokens   → need: refill logic (time-based)
+6. Check remaining quota → need: getRemainingQuota(userId)`,
+things:`RateLimitConfig → settings: maxRequests, windowSize, algorithm choice
+RequestInfo     → who is requesting: userId, endpoint, timestamp
+TokenBucket     → bucket per user with tokens that refill over time
+SlidingWindow   → tracks each request timestamp in rolling window
+RateLimiter     → the central gatekeeper that routes to strategies`,
+classify:`ENTITIES (just data, no logic):
+  RateLimitConfig  { maxRequests, windowMs, algorithm }
+  RequestInfo      { userId, endpoint, timestamp, ip }
+
+ENUMS (fixed values):
+  Algorithm  { TOKEN_BUCKET, SLIDING_WINDOW, FIXED_WINDOW, LEAKY_BUCKET }
+
+SERVICES (business logic):
+  RateLimitStrategy (Strategy interface)
+    ├── TokenBucket    { maxTokens, refillRate, buckets Map, allow(userId) }
+    ├── SlidingWindow  { maxRequests, windowMs, requests Map, allow(userId) }
+    ├── FixedWindow    { maxRequests, windowMs, counters Map, allow(userId) }
+    └── LeakyBucket    { capacity, leakRate, queues Map, allow(userId) }
+
+MANAGER (orchestrates):
+  RateLimiter  { limiters Map, configure(), isAllowed(), getRetryAfter() }`,
+ownership:`METHOD                    │ OWNER         │ WHY
+──────────────────────────┼───────────────┼──────────────────────────
+configure(endpoint, strat)│ RateLimiter   │ Manages endpoint→strategy mapping
+isAllowed(userId, ep)     │ RateLimiter   │ Multi-step: lookup config→delegate
+allow(userId)             │ Strategy      │ Algorithm's OWN core logic
+refillTokens()            │ TokenBucket   │ TokenBucket's OWN refill calc
+cleanExpired()            │ SlidingWindow │ SlidingWindow's OWN cleanup
+getRetryAfter(userId, ep) │ RateLimiter   │ Needs strategy + config info
+getRemainingQuota(userId) │ Strategy      │ Strategy knows its own state`,
+patternsWhy:`1. STRATEGY → RateLimitStrategy (TokenBucket, SlidingWindow, FixedWindow)
+   WHY: Different endpoints need different algorithms; swap per route
+   Without it: monolithic allow() with if-else for each algorithm
+
+2. SINGLETON → Global RateLimiter instance
+   WHY: All request handlers must check same rate limit state
+   Without it: each handler has its own limiter, limits not enforced
+
+3. DECORATOR → Rate limiting as middleware wrapping any endpoint
+   WHY: Add rate limiting to any route without modifying handler code
+   Without it: every handler manually calls isAllowed() — repetitive
+
+4. FACTORY → StrategyFactory.create(config) → appropriate strategy
+   WHY: Config specifies algorithm name; factory returns correct instance
+   Without it: caller manually instantiates each strategy type`,
+edgeCases:`• Distributed rate limiting → centralized store (Redis) shared across servers
+• Redis down → fail-open (allow requests) or fail-closed (block)? Configurable
+• Clock skew between servers → use Redis server time, not local time
+• Different limits per tier → free=100/min, paid=1000/min, enterprise=unlimited
+• Endpoint-specific limits → /login=5/min, /search=100/min, /read=1000/min
+• IP + user combined → limit by both; anonymous uses IP, authed uses userId
+• Burst vs sustained → Token Bucket allows bursts; Leaky Bucket smooths
+• Retry-After header → calculate exact seconds until next allowed request
+• Graceful degradation → allow with warning header vs hard 429 reject`,
+extend:`→ Distributed state       (Redis-backed counters for multi-server)
+→ Tier-based limits       (free/paid/enterprise with different configs)
+→ Dynamic rate adjustment  (auto-increase limits during low traffic)
+→ Analytics dashboard      (track 429 rates, top limited users)
+→ Whitelist/blacklist      (skip limiting for internal services)
+→ Cost-based limiting      (expensive endpoints cost more tokens)`,
+evaluates:`✅ Strategy pattern for algorithm selection (not hardcoded)
+✅ Token Bucket explained clearly (burst + refill mechanics)
+✅ Sliding Window vs Fixed Window tradeoffs understood
+✅ Middleware/Decorator approach for clean integration
+✅ Distributed concerns addressed (Redis, clock skew)
+✅ Fail-open vs fail-closed decision articulated
+✅ Per-endpoint + per-tier configurability shown`
+},
+20:{
+problem:`Pub/Sub messaging system where publishers send messages to topics.
+Subscribers register interest in topics and receive matching messages.
+Supports filtering, dead letter queues, and message replay.`,
+userDoes:`1. Create a topic       → need: createTopic(name)
+2. Subscribe to topic   → need: subscribe(subId, topicName, callback)
+3. Publish a message     → need: publish(topicName, payload)
+4. Filter messages       → need: matchesFilter(message, filter)
+5. Handle failed delivery→ need: deadLetterQueue
+6. Replay old messages   → need: messageHistory per topic
+7. Unsubscribe           → need: unsubscribe(subId, topicName)`,
+things:`Message       → the data being published (id, topic, payload, timestamp)
+Topic         → a named channel that groups related messages
+Subscription  → link between a subscriber and a topic (+ optional filter)
+DeadLetterQ   → failed deliveries stored for investigation/retry
+MessageBroker → the central system routing messages to subscribers`,
+classify:`ENTITIES (just data, no logic):
+  Message       { id, topic, payload, timestamp }
+  Topic         { name, subscribers Map }
+  Subscription  { subscriberId, topicName, callback, filter }
+
+ENUMS (fixed values):
+  DeliveryMode  { SYNC, ASYNC, BATCH }
+  AckMode       { AUTO, MANUAL }
+
+SERVICES (business logic):
+  DeliveryService (Strategy interface)
+    ├── SyncDelivery   { deliver(subscriber, message) }
+    ├── AsyncDelivery   { deliver(subscriber, message) → queued }
+    └── BatchDelivery   { collect + deliver periodically }
+  FilterService    { matchesFilter(message, filter) → bool }
+
+MANAGER (orchestrates):
+  MessageBroker  { topics Map, deadLetterQueue[], messageHistory Map,
+                   createTopic(), subscribe(), publish(), unsubscribe() }`,
+ownership:`METHOD                       │ OWNER          │ WHY
+─────────────────────────────┼────────────────┼──────────────────────
+createTopic(name)            │ MessageBroker  │ Manages topic registry
+subscribe(subId, topic, cb)  │ MessageBroker  │ Multi-step: find/create topic→add
+publish(topicName, payload)  │ MessageBroker  │ Multi-step: create msg→route→deliver
+addSubscriber(id, cb, filter)│ Topic          │ Topic's OWN subscriber list
+removeSubscriber(id)         │ Topic          │ Topic's OWN subscriber list
+matchesFilter(msg, filter)   │ FilterService  │ Business rule (matching logic)
+deliver(subscriber, msg)     │ DeliveryService│ Business rule (delivery mechanism)`,
+patternsWhy:`1. OBSERVER → Core pattern: pub/sub IS Observer at scale
+   WHY: Publishers don't know subscribers; subscribers react to events
+   Without it: publishers hardcode calls to each consumer — tight coupling
+
+2. STRATEGY → DeliveryService (Sync, Async, Batch)
+   WHY: Different topics need different delivery guarantees
+   Without it: all topics forced into same delivery mode
+
+3. CHAIN OF RESPONSIBILITY → Message filtering pipeline
+   WHY: Multiple filter criteria applied sequentially to each message
+   Without it: one monolithic filter function with tangled conditions
+
+4. FACTORY → TopicFactory for auto-creating topics on first publish
+   WHY: Topics can be created lazily when first message arrives
+   Without it: must manually pre-create every topic before use`,
+edgeCases:`• Subscriber offline → queue messages (max N, then drop oldest — backpressure)
+• Slow subscriber → async delivery so it doesn't block other subscribers
+• Topic doesn't exist on publish → auto-create or throw error? (configurable)
+• Message ordering guarantee → preserve order within a single topic
+• Duplicate messages → dedup by message ID (idempotent processing)
+• Dead letter queue → failed deliveries after N retries go to DLQ for inspection
+• Subscriber acknowledgment → at-least-once vs at-most-once delivery modes
+• Wildcard subscriptions → "events.*" matches "events.user.login"
+• Message replay → new subscriber gets last N messages from history`,
+extend:`→ Persistent messages     (survive broker restart — write to disk)
+→ Consumer groups         (only 1 subscriber in group gets each message)
+→ Message TTL             (auto-expire messages after N seconds)
+→ Partitioned topics      (parallel consumption for throughput)
+→ Schema registry         (validate message payload format)
+→ Metrics + monitoring    (message rates, consumer lag, DLQ depth)`,
+evaluates:`✅ Observer pattern is the foundation (not forced — it IS pub/sub)
+✅ Topics decouple publishers from subscribers
+✅ Dead letter queue for failed deliveries
+✅ Message history enables replay for new subscribers
+✅ Filter logic separated into FilterService
+✅ Delivery strategy is pluggable (sync/async/batch)
+✅ Edge cases show distributed systems awareness`
+},
+21:{
+problem:`In-memory file system supporting files and directories.
+Navigate paths, create/read/write/delete files, list directory contents.
+Recursive operations (size, delete) work uniformly on both types.`,
+userDoes:`1. Create a directory  → need: createDir('/docs')
+2. Create a file       → need: createFile('/docs/notes.txt', content)
+3. Read a file         → need: read('/docs/notes.txt')
+4. Write to a file     → need: write('/docs/notes.txt', newContent)
+5. List directory      → need: ls('/docs')
+6. Delete file/folder  → need: delete('/docs/notes.txt')
+7. Get size            → need: node.getSize() — recursive for dirs`,
+things:`FileSystemNode → abstract base: name, parent, createdAt
+File           → leaf node: has content, extension, size = content.length
+Directory      → composite node: has children Map of nodes
+PathResolver   → utility to resolve "/a/b/c.txt" string to actual node
+FileSystem     → the root-level manager providing the user API`,
+classify:`ENTITIES (just data, no logic):
+  FileSystemNode (abstract) { name, parent, createdAt, getPath(), getSize() }
+  File (extends Node)       { content, write(), read(), getSize() → content.length }
+  Directory (extends Node)  { children Map, add(), remove(), get(), list(),
+                              getSize() → sum of children sizes (recursive) }
+
+ENUMS (fixed values):
+  NodeType  { FILE, DIRECTORY }
+
+SERVICES (business logic):
+  PathResolver   { resolve(pathString) → FileSystemNode }
+  SearchService  { findByName(root, name), findByExtension(root, ext) }
+
+MANAGER (orchestrates):
+  FileSystem  { root Directory, createFile(), createDir(), read(), write(),
+                delete(), ls(), move() }`,
+ownership:`METHOD                │ OWNER          │ WHY
+──────────────────────┼────────────────┼──────────────────────
+createFile(path, cnt) │ FileSystem     │ Multi-step: resolve parent→create→add
+createDir(path)       │ FileSystem     │ Multi-step: resolve parent→create→add
+read(path)            │ FileSystem     │ Multi-step: resolve→validate→return
+write(path, content)  │ FileSystem     │ Multi-step: resolve→validate→write
+delete(path)          │ FileSystem     │ Multi-step: resolve→remove from parent
+ls(path)              │ FileSystem     │ Multi-step: resolve→validate dir→list
+resolve(path)         │ FileSystem     │ Traverses path segments through tree
+add(node)             │ Directory      │ Directory's OWN children management
+remove(name)          │ Directory      │ Directory's OWN children management
+getSize()             │ File/Directory │ Each node knows its OWN size (Composite)
+getPath()             │ FileSystemNode │ Node's OWN parent chain traversal`,
+patternsWhy:`1. COMPOSITE → File and Directory both extend FileSystemNode
+   WHY: getSize() on Directory recursively sums children — works uniformly
+   Without it: separate logic for files vs directories everywhere
+
+2. ITERATOR → Directory traversal (DFS/BFS for search operations)
+   WHY: Search across entire tree structure needs systematic traversal
+   Without it: ad-hoc recursive loops duplicated in every search method
+
+3. FACTORY → NodeFactory.create(type, name) returns File or Directory
+   WHY: Caller doesn't need to know which concrete class to instantiate
+   Without it: scattered new File() / new Directory() with type checks
+
+4. TEMPLATE METHOD → All operations follow: resolve path → validate → act
+   WHY: Common flow for read/write/delete, only the final action differs
+   Without it: duplicated resolve+validate logic in every method`,
+edgeCases:`• Path doesn't exist → throw "Path not found" with the full path
+• File already exists at path → overwrite or throw? (configurable flag)
+• Delete non-empty directory → recursive delete (rm -rf) or error?
+• Circular references via symlinks → detect cycles during traversal
+• Invalid file names → reject special chars (/, \\, null bytes)
+• Path too long → enforce max 255 chars per segment, max depth
+• Storage quota → track total size, reject writes beyond limit
+• Concurrent access to same file → lock during write operations
+• Move/rename across directories → remove from source, add to target`,
+extend:`→ Symlinks / shortcuts    (SymLink node that points to another path)
+→ Permissions system      (read/write/execute per user/group)
+→ File versioning         (keep last N versions of each file)
+→ Disk persistence        (serialize tree to actual file system)
+→ Watch / notify          (callback when file changes — Observer)
+→ Compression             (compress content on store, decompress on read)`,
+evaluates:`✅ Composite pattern is THE key insight (File + Directory as nodes)
+✅ Recursive getSize() works uniformly on any node
+✅ Path resolution is clean string-split traversal
+✅ Inheritance is natural here (File vs Directory)
+✅ Directory manages its own children (add/remove/list)
+✅ FileSystem orchestrates multi-step operations
+✅ Edge cases show awareness of real FS concerns`
+},
+22:{
+problem:`LRU Cache with O(1) get and put operations.
+Evicts least recently used entry when capacity is exceeded.
+Every access (get or put) marks the entry as most recently used.`,
+userDoes:`1. Create cache       → need: new LRUCache(capacity)
+2. Put key-value      → need: put(key, value)
+3. Get by key         → need: get(key) → value or -1
+4. Auto-evict on full → need: remove tail (least recently used)
+5. Mark as recent     → need: move accessed node to head
+6. Update existing    → need: update value + move to head`,
+things:`Node       → doubly linked list entry (key, value, prev, next)
+HashMap    → Map for O(1) key-to-node lookup
+DLL Head   → dummy node: most recently used end
+DLL Tail   → dummy node: least recently used end
+LRUCache   → the combined structure managing both data structures`,
+classify:`ENTITIES (just data, no logic):
+  Node  { key, value, prev, next }
+
+DATA STRUCTURES (the core trick):
+  HashMap (Map)          → key → Node reference for O(1) lookup
+  Doubly Linked List     → ordered by recency; O(1) move/remove
+    Head (dummy) → most recent
+    Tail (dummy) → least recent
+
+ENUMS (fixed values):
+  EvictionPolicy  { LRU, LFU, FIFO }
+
+SERVICES (optional extensions):
+  EvictionStrategy (Strategy interface)
+    ├── LRUEviction  { evict() → remove tail }
+    ├── LFUEviction  { evict() → remove min frequency }
+    └── FIFOEviction { evict() → remove oldest by insertion }
+
+MANAGER (orchestrates):
+  LRUCache  { capacity, map, head, tail, get(), put(), _remove(), _addToHead() }`,
+ownership:`METHOD              │ OWNER     │ WHY
+────────────────────┼───────────┼──────────────────────
+get(key)            │ LRUCache  │ Multi-step: lookup→move to head→return
+put(key, value)     │ LRUCache  │ Multi-step: create/update→add→maybe evict
+_remove(node)       │ LRUCache  │ DLL pointer manipulation (internal helper)
+_addToHead(node)    │ LRUCache  │ DLL pointer manipulation (internal helper)
+evict()             │ LRUCache  │ Remove tail.prev + delete from map
+size()              │ LRUCache  │ LRUCache knows its own map size`,
+patternsWhy:`1. STRATEGY → EvictionStrategy (LRU, LFU, FIFO)
+   WHY: Same cache interface, different eviction policies swappable
+   Without it: hardcoded LRU logic; can't switch to LFU without rewrite
+
+2. DECORATOR → Add TTL support on top of basic LRU
+   WHY: TTL is orthogonal to eviction; wraps existing get/put with expiry check
+   Without it: TTL logic tangled inside core cache operations
+
+3. PROXY → Cache-aside pattern: on miss, auto-fetch from source
+   WHY: Caller doesn't care if data is cached or needs fetching
+   Without it: every caller manually checks cache then queries DB
+
+4. OBSERVER → Notify on eviction events (for metrics/logging)
+   WHY: Monitor cache hit/miss rate without polluting cache logic
+   Without it: logging code scattered inside get/put methods`,
+edgeCases:`• Capacity = 0 → every put immediately evicts; get always returns -1
+• Concurrent get/put → need thread-safe version (lock on both operations)
+• TTL per key → check expiry on get; lazy cleanup or background sweep
+• Cache miss callback → auto-fetch from DB/API on miss and cache result
+• Memory-based capacity → evict by total bytes, not just entry count
+• Warm-up → pre-populate cache on startup from DB for hot keys
+• Null values → distinguish "key not found" from "key exists with null"
+• Very large values → single entry could consume most of capacity`,
+extend:`→ TTL per entry           (expire after N seconds regardless of access)
+→ LFU variant             (evict least frequently used — frequency counter)
+→ Distributed cache       (consistent hashing across multiple nodes)
+→ Write-through/back      (sync or async write to backing store on put)
+→ Metrics dashboard       (hit rate, miss rate, eviction count, size)
+→ Multi-level cache       (L1 in-process + L2 Redis + L3 database)`,
+evaluates:`✅ HashMap + DLL combo for O(1) on both get and put
+✅ Dummy head/tail eliminate null-check edge cases
+✅ Key stored in Node so eviction can delete from Map
+✅ _remove and _addToHead are clean internal helpers
+✅ Understands WHY this is O(1) (not just how)
+✅ Strategy pattern for eviction policy extensibility
+✅ This is LeetCode #146 — must be implemented perfectly`
+},
+23:{
+problem:`Notification system that sends alerts via multiple channels (push, email, SMS).
+Respects user preferences, quiet hours, priority levels, and templates.
+Handles retries, fallbacks, batching, and deduplication.`,
+userDoes:`1. Event triggers notify  → need: send(userId, type, data)
+2. Check user preferences → need: getUserPreferences(userId)
+3. Render template        → need: templateService.render(type, data)
+4. Check quiet hours      → need: isQuietHours(prefs)
+5. Send via channel       → need: channelStrategy.send(userId, content)
+6. Handle failure         → need: retry with fallback channel
+7. Queue low priority     → need: priorityQueue for deferred delivery`,
+things:`Notification      → the alert being sent (id, userId, type, channel, content, status, priority)
+NotificationTemplate → template with placeholders for subject + body
+UserPreference    → which channels enabled, quiet hours, frequency limits
+Channel           → delivery mechanism: push, email, SMS, in-app
+PriorityQueue     → processes P1 (OTP) first, batches P3 (marketing)
+NotificationManager → orchestrates the full send pipeline`,
+classify:`ENTITIES (just data, no logic):
+  Notification          { id, userId, type, content, channel, priority, status, createdAt }
+  NotificationTemplate  { type, subject, body with vars }
+  UserPreference        { userId, enabledChannels[], quietStart, quietEnd, frequency }
+
+ENUMS (fixed values):
+  Channel   { PUSH, EMAIL, SMS, IN_APP }
+  Priority  { CRITICAL:1, HIGH:2, MEDIUM:3, LOW:4 }
+  Status    { PENDING, SENT, FAILED, QUEUED }
+
+SERVICES (business logic):
+  ChannelStrategy (Strategy interface)
+    ├── PushService   { send(userId, content) }
+    ├── EmailService  { send(userId, content) }
+    ├── SMSService    { send(userId, content) }
+    └── InAppService  { send(userId, content) }
+  TemplateService   { render(type, data) → {subject, title, body} }
+  PreferenceService { getPrefs(userId), isChannelEnabled(), isQuietHours() }
+
+MANAGER (orchestrates):
+  NotificationManager { channels Map, templates, preferences,
+                        send(), schedule(), processQueue(), retry() }`,
+ownership:`METHOD                     │ OWNER               │ WHY
+───────────────────────────┼─────────────────────┼──────────────────────
+send(userId, type, data)   │ NotificationManager │ Multi-step: prefs→template→route→deliver
+render(type, data)         │ TemplateService     │ Business rule (template interpolation)
+send(userId, content)      │ ChannelStrategy     │ Channel's OWN delivery mechanism
+isQuietHours(prefs)        │ PreferenceService   │ Business rule (time comparison)
+isChannelEnabled(ch)       │ UserPreference      │ Preference's OWN data check
+processQueue()             │ NotificationManager │ Multi-step: dequeue→priority sort→send
+retry(notification)        │ NotificationManager │ Multi-step: check retries→fallback channel`,
+patternsWhy:`1. STRATEGY → ChannelStrategy (PushService, EmailService, SMSService)
+   WHY: Each channel has completely different send mechanics; same interface
+   Without it: giant switch-case in send() for each channel type
+
+2. OBSERVER → Events trigger notifications (OrderPlaced → notify user+restaurant+driver)
+   WHY: Event producers don't know who needs notifying; decoupled
+   Without it: order service hardcodes calls to notification for each recipient
+
+3. TEMPLATE METHOD → All channels follow: validate → render → deliver → log
+   WHY: Common pipeline, only delivery step varies per channel
+   Without it: duplicated validate/log logic in every channel service
+
+4. BUILDER → NotificationBuilder().to(user).type(ORDER_UPDATE).channel(PUSH).data({}).build()
+   WHY: Notifications have many optional fields; fluent construction
+   Without it: constructor with 8+ parameters, most optional`,
+edgeCases:`• User disabled a channel → skip that channel, try next enabled one
+• All channels fail → retry 3x with exponential backoff, then DLQ
+• Duplicate event processed twice → dedup by event_id before sending
+• Rate limiting per user → max 5 push/hour to avoid spam
+• Quiet hours (10pm-8am) → queue P3/P4, deliver P1 immediately
+• Batch notifications → group "10 people liked your post" into one push
+• Channel fallback → push fails → try SMS → try email (priority chain)
+• Device token expired → mark as invalid, notify user to re-register
+• Unsubscribe in email → one-click unsubscribe link (legal requirement)`,
+extend:`→ Batch/digest mode       (aggregate N events into 1 notification)
+→ A/B testing             (test different templates for engagement)
+→ Delivery tracking       (open rates, click rates per channel)
+→ Scheduling              (send at user's optimal engagement time)
+→ Multi-language templates (locale-based template selection)
+→ Webhook channel         (notify external systems via HTTP callback)`,
+evaluates:`✅ Strategy pattern for channels (clean pluggable delivery)
+✅ Template rendering separates content from delivery logic
+✅ Priority queue ensures OTP/security never waits
+✅ Quiet hours + user preferences show real-world awareness
+✅ Retry with fallback channel chain is production-grade
+✅ Deduplication by event_id prevents spam
+✅ Builder pattern for complex notification construction`
+},
+24:{
+problem:`Payment system processing transactions via multiple methods (card, UPI, wallet).
+Supports payments, refunds, idempotency, fraud detection, and audit trail.
+Ensures exactly-once processing even with network retries.`,
+userDoes:`1. Initiate payment      → need: pay(userId, amount, method, idempotencyKey)
+2. Check idempotency     → need: lookup idempotencyKey in store
+3. Assess fraud risk     → need: fraudService.assess(user, amount)
+4. Charge via method     → need: paymentMethod.charge(amount)
+5. Record in ledger      → need: ledgerService.credit() + debit()
+6. Request refund        → need: refund(transactionId)
+7. Get transaction history→ need: getHistory(userId)`,
+things:`Transaction     → the payment record (id, userId, amount, method, status, idempotencyKey)
+PaymentMethod   → how to charge: credit card, UPI, net banking, wallet
+FraudService    → risk scoring: block suspicious transactions
+LedgerService   → double-entry bookkeeping: every credit has a debit
+IdempotencyStore→ maps idempotencyKey → transactionId to prevent double-charge
+PaymentGateway  → the central orchestrator managing the full payment flow`,
+classify:`ENTITIES (just data, no logic):
+  Transaction  { id, userId, amount, method, status, idempotencyKey,
+                 gatewayRef, createdAt }
+
+ENUMS (fixed values):
+  TxnStatus      { PENDING, SUCCESS, FAILED, REFUND_PENDING, REFUNDED }
+  PaymentType    { CREDIT_CARD, UPI, NET_BANKING, WALLET }
+
+SERVICES (business logic):
+  PaymentMethod (Strategy interface)
+    ├── CreditCardPayment  { charge(amount, token), refund(ref, amount) }
+    ├── UPIPayment         { charge(amount, upiId), refund(ref, amount) }
+    ├── WalletPayment      { charge(amount, userId), refund(ref, amount) }
+    └── NetBankingPayment  { charge(amount, bankId), refund(ref, amount) }
+  FraudService    { assess(userId, amount) → riskScore, isBlocked? }
+  LedgerService   { credit(account, amount), debit(account, amount), reverse(txn) }
+
+MANAGER (orchestrates):
+  PaymentGateway  { transactions Map, idempotencyStore Map, methods Map,
+                    pay(), refund(), getHistory() }`,
+ownership:`METHOD                        │ OWNER           │ WHY
+──────────────────────────────┼─────────────────┼──────────────────────
+pay(userId, amt, method, key) │ PaymentGateway  │ Multi-step: idemp→fraud→charge→ledger
+refund(transactionId)         │ PaymentGateway  │ Multi-step: validate→reverse→ledger
+charge(amount, token)         │ PaymentMethod   │ Method's OWN charging mechanic
+refund(ref, amount)           │ PaymentMethod   │ Method's OWN refund mechanic
+assess(userId, amount)        │ FraudService    │ Business rule (risk scoring)
+credit(account, amount)       │ LedgerService   │ Business rule (bookkeeping)
+debit(account, amount)        │ LedgerService   │ Business rule (bookkeeping)
+reverse(originalTxn)          │ LedgerService   │ Business rule (reversal entry)`,
+patternsWhy:`1. STRATEGY → PaymentMethod (CreditCard, UPI, Wallet, NetBanking)
+   WHY: Each method has different APIs, auth flows, refund mechanics
+   Without it: massive if-else in pay() for each payment type
+
+2. STATE → Transaction lifecycle: PENDING → SUCCESS/FAILED → REFUNDED
+   WHY: Only valid transitions allowed; can't refund a FAILED transaction
+   Without it: invalid state transitions cause data corruption
+
+3. COMMAND → Each Transaction is a Command (reversible via refund)
+   WHY: Payments are operations that can be undone (refund = undo)
+   Without it: refund logic scattered, no clean reversal abstraction
+
+4. FACTORY → PaymentMethodFactory.create(type) → correct processor
+   WHY: Client specifies method name; factory returns right implementation
+   Without it: caller manually instantiates each payment class`,
+edgeCases:`• Network timeout during charge → payment may have succeeded! Check status first
+• Double charge prevention → idempotency key (UUID per request) — return cached result
+• Partial refund → refund 200 of 500 order; track remaining refundable amount
+• Currency conversion → international payments need FX rate at time of charge
+• Daily/monthly limits per user → configurable per user tier
+• PCI compliance → never store full card numbers; use tokenization
+• Reconciliation → daily batch: match bank statements with our transaction records
+• Webhook notification → notify merchant on payment status change (async)
+• Wallet balance check → reject immediately if insufficient (unlike card)`,
+extend:`→ Subscription/recurring  (auto-charge monthly with saved payment method)
+→ Split payments          (pay 50% card + 50% wallet on one order)
+→ Escrow                  (hold funds until service delivered, then release)
+→ Multi-currency          (FX conversion + settlement in merchant currency)
+→ Payout system           (pay merchants their earnings on schedule)
+→ Audit log               (immutable append-only log of every state change)`,
+evaluates:`✅ Idempotency is the #1 concept (prevents double-charging)
+✅ Strategy pattern for payment methods (clean interface)
+✅ State machine for transaction lifecycle
+✅ Fraud check before charging (not after)
+✅ Ledger service for double-entry bookkeeping
+✅ Timeout ≠ failure — always check status before retry
+✅ Never store raw card numbers (tokenization for PCI compliance)`
+},
+25:{
+problem:`Task scheduler that runs jobs at specific times or recurring intervals.
+Supports priority-based execution, retry with exponential backoff.
+Uses a min-heap to efficiently determine the next task to execute.`,
+userDoes:`1. Schedule a task      → need: schedule(name, callback, delay, interval)
+2. Cancel a task        → need: cancel(taskId)
+3. Execute due tasks    → need: run loop checks heap top vs current time
+4. Handle task failure  → need: retry with exponential backoff
+5. Reschedule recurring → need: recalculate executeAt after completion
+6. View execution logs  → need: logs[] with taskId, start, end, status`,
+things:`Task          → the job to run (id, name, callback, executeAt, interval, priority, status)
+ExecutionLog  → record of each run attempt (taskId, startTime, endTime, status, error)
+MinHeap       → priority queue sorted by executeAt for O(1) peek next task
+RetryService  → exponential backoff: reschedule at now + 2^retryCount seconds
+Scheduler     → the engine that manages the task queue and run loop`,
+classify:`ENTITIES (just data, no logic):
+  Task          { id, name, callback, executeAt, interval, priority,
+                  status, retryCount, maxRetries }
+  ExecutionLog  { taskId, startTime, endTime, status, error }
+
+ENUMS (fixed values):
+  TaskStatus  { SCHEDULED, RUNNING, COMPLETED, FAILED, CANCELLED }
+
+DATA STRUCTURES:
+  MinHeap     { heap[], push(task), pop(), peek(), size(),
+                _bubbleUp(), _sinkDown() — sorted by executeAt }
+
+SERVICES (business logic):
+  RetryService     { shouldRetry(task) → bool, getNextRetryTime(task) → timestamp }
+  ExecutorService  { run(task, timeout) → success/fail }
+
+MANAGER (orchestrates):
+  Scheduler  { queue (MinHeap), tasks Map, logs[],
+               schedule(), cancel(), start(), stop(), _tick(), _execute() }`,
+ownership:`METHOD                        │ OWNER         │ WHY
+──────────────────────────────┼───────────────┼──────────────────────
+schedule(name, cb, delay, int)│ Scheduler     │ Multi-step: create task→set time→enqueue
+cancel(taskId)                │ Scheduler     │ Lookup task→mark CANCELLED
+start() / stop()              │ Scheduler     │ Controls the run loop lifecycle
+_tick()                       │ Scheduler     │ Check heap top→dequeue if due→execute
+_execute(task)                │ Scheduler     │ Multi-step: run→log→retry/reschedule
+isRecurring()                 │ Task          │ Task's OWN data (interval !== null)
+push(task) / pop()            │ MinHeap       │ Heap's OWN insertion/extraction
+shouldRetry(task)             │ RetryService  │ Business rule (retryCount &lt; max)
+getNextRetryTime(task)        │ RetryService  │ Business rule (2^retryCount * 1000)`,
+patternsWhy:`1. COMMAND → Each Task encapsulates execution logic as an object
+   WHY: Tasks are first-class objects that can be queued, cancelled, retried
+   Without it: raw function references with no metadata or lifecycle
+
+2. STRATEGY → SchedulingStrategy (FixedRate, FixedDelay, CronExpression)
+   WHY: Different tasks need different scheduling semantics
+   Without it: one-size-fits-all interval logic for all task types
+
+3. OBSERVER → Notify on task completion/failure (for monitoring/alerting)
+   WHY: Monitoring system needs to know about failures without polling
+   Without it: tight coupling between scheduler and alerting code
+
+4. PRIORITY QUEUE (Min-Heap) → O(log n) insert, O(1) peek next due task
+   WHY: Thousands of scheduled tasks; need efficient next-task retrieval
+   Without it: linear scan of all tasks every tick — O(n) per cycle`,
+edgeCases:`• Task takes too long → timeout + kill + mark FAILED (prevent runaway)
+• System restart → persist scheduled tasks to disk/DB to recover state
+• Clock skew in distributed system → use centralized time source
+• Overlapping executions → previous run still going when next fires → skip or queue?
+• Resource exhaustion → 100 tasks due at once → bounded thread/worker pool
+• Task dependency → B runs only after A completes (DAG-based scheduling)
+• Timezone handling → cron "0 9 * * *" in which timezone?
+• Missed schedules → system was down during scheduled time → run now or skip?
+• Exponential backoff cap → don't retry after 3 hours; max backoff = 5 minutes`,
+extend:`→ Cron expression parsing  (parse "*/5 * * * *" into next execution time)
+→ Task dependency DAG      (B waits for A; C waits for A+B)
+→ Distributed scheduler    (leader election; only one node runs each task)
+→ Persistence layer        (survive restarts — Redis/DB backed)
+→ Dashboard + monitoring   (running tasks, success rate, avg duration)
+→ Rate limiting            (max N tasks executing concurrently)`,
+evaluates:`✅ Min-heap is THE data structure choice (O(log n) insert, O(1) peek)
+✅ Recurring tasks rescheduled after completion (not before)
+✅ Retry with exponential backoff (2^retryCount seconds)
+✅ Command pattern: tasks as first-class objects with lifecycle
+✅ Strategy for scheduling modes (FixedRate vs FixedDelay vs Cron)
+✅ Clean separation: Scheduler orchestrates, Task holds data, Heap orders
+✅ Edge cases show production awareness (timeout, persistence, overlap)`
+}
+};
+
 function renderLldQuestion(q,qi,totalQ){
+  const d=LLD_DETAIL[q.n];
   let html=`<div class="lld-walkthrough" id="lld-item-${qi}">`;
   html+=`<div class="lld-title-bar"><span class="lld-qnum">Q${q.n}</span>${q.t}</div>`;
   html+=`<div class="lld-walkthrough-body">`;
@@ -3550,40 +5763,65 @@ function renderLldQuestion(q,qi,totalQ){
   html+=`<div class="mg-step"><span class="mg-num">8.</span> How to EXTEND? <span class="mg-arrow-r">→</span> add feature <span>without changing</span> existing code</div>`;
   html+=`</div></div>`;
 
-  // Step 1: THE PROBLEM
-  html+=`<div class="lld-step-block"><div class="lld-step-header"><span class="step-num">1</span><span class="step-label">THE PROBLEM</span></div>`;
-  html+=`<div class="step-desc">Read this once. Everything below is derived from this single statement.</div>`;
-  html+=`<div class="lld-problem-box">${q.req}</div></div>`;
+  if(d){
+  // ===== NEW DETAILED FORMAT =====
+  // THE PROBLEM
+  html+=`<div class="lld-step-block"><div class="lld-step-header"><span class="step-num">0</span><span class="step-label">THE PROBLEM</span></div>`;
+  html+=`<pre class="lld-pre-block">${d.problem}</pre></div>`;
 
-  // Step 2: What does user DO?
-  html+=`<div class="lld-step-block"><div class="lld-step-header"><span class="step-num">2</span><span class="step-label">What does user DO?</span><span class="step-sub">→ derive methods from this</span></div>`;
-  html+=`<div class="step-desc">Walk through the user journey step by step. Each user action becomes a method. Each step in the flow tells you WHO calls WHAT.</div>`;
-  html+=`<div class="lld-flow">${q.flow}</div></div>`;
+  // Step 1: What does user DO?
+  html+=`<div class="lld-step-block"><div class="lld-step-header"><span class="step-num">1</span><span class="step-label">What does user DO?</span><span class="step-sub">→ derive methods from this</span></div>`;
+  html+=`<pre class="lld-pre-green">${d.userDoes}</pre></div>`;
 
-  // Step 3: What THINGS exist?
-  html+=`<div class="lld-step-block"><div class="lld-step-header"><span class="step-num">3</span><span class="step-label">What THINGS exist?</span><span class="step-sub">→ Entity / Service / Manager</span></div>`;
-  html+=`<div class="step-desc">Every noun from Step 1 is a potential class. Classify each: Entity = holds data + small self-methods. Service = business logic across multiple objects. Manager = orchestrates the full flow.</div>`;
-  html+=`<div class="lld-classes">${q.classes}</div></div>`;
+  // Step 2: What THINGS exist?
+  html+=`<div class="lld-step-block"><div class="lld-step-header"><span class="step-num">2</span><span class="step-label">What THINGS exist?</span><span class="step-sub">→ derive classes from this</span></div>`;
+  html+=`<pre class="lld-pre-block">${d.things}</pre></div>`;
 
-  // Step 4: The complete code
-  html+=`<div class="lld-step-block"><div class="lld-step-header"><span class="step-num">4</span><span class="step-label">Complete Code</span><span class="step-sub">→ constructor + methods</span></div>`;
-  html+=`<div class="step-desc">Rule: method needs only SELF data? → put it on that Entity. Needs BUSINESS rules or multiple objects? → Service. Coordinates a multi-step flow? → Manager.</div>`;
+  // Step 3: Classify
+  html+=`<div class="lld-step-block"><div class="lld-step-header"><span class="step-num">3</span><span class="step-label">Classify</span><span class="step-sub">→ Entity / Service / Manager</span></div>`;
+  html+=`<pre class="lld-pre-orange">${d.classify}</pre></div>`;
+
+  // Step 4: WHO owns WHAT method?
+  html+=`<div class="lld-step-block"><div class="lld-step-header"><span class="step-num">4</span><span class="step-label">WHO owns WHAT method?</span><span class="step-sub">→ THE key decision</span></div>`;
+  html+=`<pre class="lld-pre-blue">${d.ownership}</pre></div>`;
+
+  // Step 5: Complete Code
+  html+=`<div class="lld-step-block"><div class="lld-step-header"><span class="step-num">5</span><span class="step-label">Complete Code</span></div>`;
   html+=`<pre>${q.code}</pre></div>`;
 
-  // Step 5: Design patterns & WHY
+  // Step 6: Design Patterns & WHY
+  html+=`<div class="lld-step-block"><div class="lld-step-header"><span class="step-num">6</span><span class="step-label">Design Patterns & WHY</span></div>`;
+  html+=`<pre class="lld-pre-purple">${d.patternsWhy}</pre></div>`;
+
+  // Step 7: Edge Cases
+  html+=`<div class="lld-step-block"><div class="lld-step-header"><span class="step-num">7</span><span class="step-label">What can GO WRONG?</span><span class="step-sub">→ edge cases</span></div>`;
+  html+=`<pre class="lld-pre-red">${d.edgeCases}</pre></div>`;
+
+  // Step 8: How to EXTEND
+  html+=`<div class="lld-step-block"><div class="lld-step-header"><span class="step-num">8</span><span class="step-label">How to EXTEND?</span><span class="step-sub">→ Open/Closed principle</span></div>`;
+  html+=`<pre class="lld-pre-green">${d.extend}</pre></div>`;
+
+  // Step 9: What interviewer evaluates
+  html+=`<div class="lld-step-block"><div class="lld-step-header"><span class="step-num">9</span><span class="step-label">What interviewer evaluates</span></div>`;
+  html+=`<pre class="lld-pre-tip">${d.evaluates}</pre></div>`;
+
+  } else {
+  // ===== FALLBACK: old format =====
+  html+=`<div class="lld-step-block"><div class="lld-step-header"><span class="step-num">1</span><span class="step-label">THE PROBLEM</span></div>`;
+  html+=`<div class="lld-problem-box">${q.req}</div></div>`;
+  html+=`<div class="lld-step-block"><div class="lld-step-header"><span class="step-num">2</span><span class="step-label">What does user DO?</span></div>`;
+  html+=`<div class="lld-flow">${q.flow}</div></div>`;
+  html+=`<div class="lld-step-block"><div class="lld-step-header"><span class="step-num">3</span><span class="step-label">What THINGS exist?</span></div>`;
+  html+=`<div class="lld-classes">${q.classes}</div></div>`;
+  html+=`<div class="lld-step-block"><div class="lld-step-header"><span class="step-num">4</span><span class="step-label">Complete Code</span></div>`;
+  html+=`<pre>${q.code}</pre></div>`;
   html+=`<div class="lld-step-block"><div class="lld-step-header"><span class="step-num">5</span><span class="step-label">Design Patterns & WHY</span></div>`;
-  html+=`<div class="step-desc">Don't just name the pattern — say WHY it fits. "Strategy because adding a new billing type tomorrow shouldn't change the ParkingLot class."</div>`;
   html+=`<div class="lld-patterns">${q.patterns}</div></div>`;
-
-  // Step 6: Edge cases
-  html+=`<div class="lld-step-block"><div class="lld-step-header"><span class="step-num">6</span><span class="step-label">What can GO WRONG?</span><span class="step-sub">→ edge cases</span></div>`;
-  html+=`<div class="step-desc">Think: concurrent access (two users, same resource), resource exhaustion (full/empty), failures (payment fails, network down), invalid input, timeouts.</div>`;
+  html+=`<div class="lld-step-block"><div class="lld-step-header"><span class="step-num">6</span><span class="step-label">What can GO WRONG?</span></div>`;
   html+=`<div class="lld-edge">${q.edge}</div></div>`;
-
-  // Step 7: What interviewer evaluates
   html+=`<div class="lld-step-block"><div class="lld-step-header"><span class="step-num">7</span><span class="step-label">What interviewer evaluates</span></div>`;
-  html+=`<div class="step-desc">These are the signals that make the interviewer check "strong hire." Mention these points explicitly during your walkthrough.</div>`;
   html+=`<div class="lld-tip-box">${q.tip}</div></div>`;
+  }
 
   // Prev/Next navigation
   html+=`<div class="lld-nav">`;
